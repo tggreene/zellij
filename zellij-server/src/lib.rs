@@ -84,6 +84,9 @@ pub enum ServerInstruction {
     UnblockInputThread,
     ClientExit(ClientId, Option<NotificationEnd>),
     RemoveClient(ClientId),
+    EjectAllOtherClients {
+        requesting_client_id: ClientId,
+    },
     Error(String),
     KillSession,
     DetachSession(Vec<ClientId>, Option<NotificationEnd>),
@@ -137,6 +140,7 @@ impl From<&ServerInstruction> for ServerContext {
             ServerInstruction::UnblockInputThread => ServerContext::UnblockInputThread,
             ServerInstruction::ClientExit(..) => ServerContext::ClientExit,
             ServerInstruction::RemoveClient(..) => ServerContext::RemoveClient,
+            ServerInstruction::EjectAllOtherClients { .. } => ServerContext::RemoveClient,
             ServerInstruction::Error(_) => ServerContext::Error,
             ServerInstruction::KillSession => ServerContext::KillSession,
             ServerInstruction::DetachSession(..) => ServerContext::DetachSession,
@@ -1183,6 +1187,54 @@ pub fn start_server(mut os_input: Box<dyn ServerOsApi>, socket_path: PathBuf) {
                         .unwrap()
                         .senders
                         .send_to_plugin(PluginInstruction::RemoveClient(client_id))
+                        .unwrap();
+                }
+            },
+            ServerInstruction::EjectAllOtherClients {
+                requesting_client_id,
+            } => {
+                let all_clients: Vec<ClientId> = session_state
+                    .read()
+                    .unwrap()
+                    .client_ids()
+                    .iter()
+                    .cloned()
+                    .collect();
+                for client_id in all_clients {
+                    if client_id != requesting_client_id {
+                        let is_watcher = session_state.read().unwrap().is_watcher(&client_id);
+                        if is_watcher {
+                            session_state.write().unwrap().remove_watcher(client_id);
+                            if let Some(session_data) = session_data.write().unwrap().as_ref() {
+                                let _ = session_data
+                                    .senders
+                                    .send_to_screen(ScreenInstruction::RemoveWatcherClient(
+                                        client_id,
+                                    ));
+                            }
+                            os_input.remove_client(client_id).unwrap();
+                        } else {
+                            remove_client!(client_id, os_input, session_state);
+                            if let Some(session_data) = session_data.write().unwrap().as_ref() {
+                                let _ = session_data
+                                    .senders
+                                    .send_to_screen(ScreenInstruction::RemoveClient(client_id));
+                                let _ = session_data
+                                    .senders
+                                    .send_to_plugin(PluginInstruction::RemoveClient(client_id));
+                            }
+                        }
+                    }
+                }
+                // Resize screen to the remaining client(s)
+                if let Some(min_size) = session_state.read().unwrap().min_client_terminal_size() {
+                    session_data
+                        .write()
+                        .unwrap()
+                        .as_ref()
+                        .unwrap()
+                        .senders
+                        .send_to_screen(ScreenInstruction::TerminalResize(min_size))
                         .unwrap();
                 }
             },

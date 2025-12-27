@@ -718,7 +718,8 @@ impl From<crate::input::actions::Action>
             FocusPluginPaneWithIdAction, FocusPreviousPaneAction, FocusTerminalPaneWithIdAction,
             GoToNextTabAction, GoToPreviousTabAction, GoToTabAction, GoToTabNameAction,
             HalfPageScrollDownAction, HalfPageScrollUpAction, KeybindPipeAction,
-            LaunchOrFocusPluginAction, LaunchPluginAction, ListClientsAction, MouseEventAction,
+            LaunchOrFocusPluginAction, LaunchPluginAction, ListClientsAction, EjectClientAction,
+            EjectAllOtherClientsAction, MouseEventAction,
             MoveFocusAction, MoveFocusOrTabAction, MovePaneAction, MovePaneBackwardsAction,
             MoveTabAction, NewBlockingPaneAction, NewFloatingPaneAction,
             NewFloatingPluginPaneAction, NewInPlacePaneAction, NewInPlacePluginPaneAction,
@@ -1275,6 +1276,14 @@ impl From<crate::input::actions::Action>
             }),
             crate::input::actions::Action::ListClients => {
                 ActionType::ListClients(ListClientsAction {})
+            },
+            crate::input::actions::Action::EjectClient { client_id } => {
+                ActionType::EjectClient(EjectClientAction {
+                    client_id: client_id as u32,
+                })
+            },
+            crate::input::actions::Action::EjectAllOtherClients => {
+                ActionType::EjectAllOtherClients(EjectAllOtherClientsAction {})
             },
             crate::input::actions::Action::TogglePanePinned => {
                 ActionType::TogglePanePinned(TogglePanePinnedAction {})
@@ -1890,6 +1899,14 @@ impl TryFrom<crate::client_server_contract::client_server_contract::Action>
                 })
             },
             ActionType::ListClients(_) => Ok(crate::input::actions::Action::ListClients),
+            ActionType::EjectClient(eject_client_action) => {
+                Ok(crate::input::actions::Action::EjectClient {
+                    client_id: eject_client_action.client_id as u16,
+                })
+            },
+            ActionType::EjectAllOtherClients(_) => {
+                Ok(crate::input::actions::Action::EjectAllOtherClients)
+            },
             ActionType::TogglePanePinned(_) => Ok(crate::input::actions::Action::TogglePanePinned),
             ActionType::StackPanes(stack_panes_action) => {
                 Ok(crate::input::actions::Action::StackPanes {

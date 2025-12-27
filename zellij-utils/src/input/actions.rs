@@ -446,6 +446,10 @@ pub enum Action {
         pane_title: Option<String>,
     },
     ListClients,
+    EjectClient {
+        client_id: u16,
+    },
+    EjectAllOtherClients,
     TogglePanePinned,
     StackPanes {
         pane_ids: Vec<PaneId>,
@@ -1163,6 +1167,8 @@ impl Action {
                 }])
             },
             CliAction::ListClients => Ok(vec![Action::ListClients]),
+            CliAction::EjectClient { client_id } => Ok(vec![Action::EjectClient { client_id }]),
+            CliAction::EjectAllOtherClients => Ok(vec![Action::EjectAllOtherClients]),
             CliAction::TogglePanePinned => Ok(vec![Action::TogglePanePinned]),
             CliAction::StackPanes { pane_ids } => {
                 let mut malformed_ids = vec![];

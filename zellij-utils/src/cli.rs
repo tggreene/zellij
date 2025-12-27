@@ -1061,6 +1061,14 @@ tail -f /tmp/my-live-logfile | zellij action pipe --name logs --plugin https://e
         plugin_title: Option<String>,
     },
     ListClients,
+    /// Eject a specific client from the session by client ID
+    EjectClient {
+        /// The client ID to eject (use list-clients to see IDs)
+        #[clap(value_parser)]
+        client_id: u16,
+    },
+    /// Eject all other clients except the current one
+    EjectAllOtherClients,
     TogglePanePinned,
     /// Stack pane ids
     /// Ids are a space separated list of pane ids.

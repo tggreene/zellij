@@ -1499,6 +1499,20 @@ pub(crate) fn route_action(
                 ))
                 .with_context(err_context)?;
         },
+        Action::EjectClient {
+            client_id: target_client_id,
+        } => {
+            senders
+                .send_to_server(ServerInstruction::RemoveClient(target_client_id))
+                .with_context(err_context)?;
+        },
+        Action::EjectAllOtherClients => {
+            senders
+                .send_to_server(ServerInstruction::EjectAllOtherClients {
+                    requesting_client_id: client_id,
+                })
+                .with_context(err_context)?;
+        },
         Action::TogglePanePinned => {
             senders
                 .send_to_screen(ScreenInstruction::TogglePanePinned(

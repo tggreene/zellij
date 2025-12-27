@@ -222,6 +222,8 @@ message Action {
     CliPipeAction cli_pipe = 84;
     KeybindPipeAction keybind_pipe = 85;
     ListClientsAction list_clients = 86;
+    EjectClientAction eject_client = 95;
+    EjectAllOtherClientsAction eject_all_other_clients = 96;
     TogglePanePinnedAction toggle_pane_pinned = 87;
     StackPanesAction stack_panes = 88;
     ChangeFloatingPaneCoordinatesAction change_floating_pane_coordinates = 89;
@@ -286,6 +288,10 @@ message BreakPaneAction {}
 message BreakPaneRightAction {}
 message BreakPaneLeftAction {}
 message ListClientsAction {}
+message EjectClientAction {
+  uint32 client_id = 1;
+}
+message EjectAllOtherClientsAction {}
 message TogglePanePinnedAction {}
 message TogglePaneInGroupAction {}
 message ToggleGroupMarkingAction {}
