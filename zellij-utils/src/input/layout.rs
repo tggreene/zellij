@@ -1335,6 +1335,7 @@ impl Layout {
         layout_dir: Option<PathBuf>,
     ) -> Result<(String, String, Option<(String, String)>), ConfigError> {
         // (path_to_layout as String, stringified_layout, Option<path_to_swap_layout as String, stringified_swap_layout>)
+        log::info!("Loading layout: path={:?}, layout_dir={:?}", layout_path, layout_dir);
         match layout_path {
             Some(layout_path) => {
                 // The way we determine where to look for the layout is similar to
@@ -1481,9 +1482,12 @@ impl Layout {
         match layout_dir {
             Some(dir) => {
                 let layout_path = &dir.join(layout);
-                if layout_path.with_extension("kdl").exists() {
+                let layout_path_with_ext = layout_path.with_extension("kdl");
+                if layout_path_with_ext.exists() {
+                    log::info!("Found custom layout at {:?}", layout_path_with_ext);
                     Self::stringified_from_path(layout_path)
                 } else {
+                    log::warn!("Custom layout not found at {:?}, falling back to built-in assets", layout_path_with_ext);
                     Layout::stringified_from_default_assets(layout)
                 }
             },
@@ -1525,6 +1529,7 @@ impl Layout {
         // TODO: ideally these should not be hard-coded
         // we should load layouts by name from the config
         // and load them from a hashmap or some such
+        log::info!("Using built-in layout: {:?}", path);
         match path.to_str() {
             Some("default") => Ok((
                 "Default layout".into(),

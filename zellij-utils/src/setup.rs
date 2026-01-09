@@ -675,6 +675,7 @@ impl Setup {
             .or_else(|| {
                 get_layout_dir(cli_args.config_dir.clone().or_else(find_default_config_dir))
             });
+        log::info!("Layout directory: {:?}", layout_dir);
         // the chosen layout can either be a path relative to the layout_dir or a name of one
         // of our assets, this distinction is made when parsing the layout - TODO: ideally, this
         // logic should not be split up and all the decisions should happen here
@@ -687,6 +688,7 @@ impl Setup {
                     .and_then(|cli_options| cli_options.default_layout.clone())
             })
             .or_else(|| config.options.default_layout.clone());
+        log::info!("Chosen layout: {:?}", chosen_layout);
         if let Some(layout_url) = chosen_layout
             .as_ref()
             .and_then(|l| l.to_str())

@@ -39,14 +39,14 @@ use miette::{Report, Result};
 use zellij_server::{os_input_output::get_server_os_input, start_server as start_server_impl};
 use zellij_utils::{
     cli::{CliArgs, Command, SessionCommand, Sessions},
-    data::ConnectToSession,
+    data::{ConnectToSession, LayoutInfo},
     envs,
     input::{
         actions::Action,
         config::{Config, ConfigError},
         options::Options,
     },
-    setup::Setup,
+    setup::{find_default_config_dir, get_layout_dir, Setup},
 };
 
 pub(crate) use zellij_utils::sessions::list_sessions;
@@ -620,6 +620,29 @@ pub(crate) fn start_client(opts: CliArgs) {
         let mut should_create_detached = false;
         let mut layout_info = None;
         let mut new_session_cwd = None;
+
+        // Set layout_info from cli_args if a layout was specified
+        if let Some(layout_path) = &opts.layout {
+            let layout_dir = config_options.layout_dir.clone().or_else(|| {
+                get_layout_dir(opts.config_dir.clone().or_else(find_default_config_dir))
+            });
+
+            // For simple names like "home" (no extension, single component),
+            // construct a File path in the layout directory instead of treating as BuiltIn
+            if layout_path.extension().is_none()
+                && layout_path.components().count() == 1
+                && !layout_path.to_str().map(|s| s.starts_with("http://") || s.starts_with("https://")).unwrap_or(false)
+            {
+                if let Some(dir) = &layout_dir {
+                    let full_path = dir.join(layout_path).with_extension("kdl");
+                    layout_info = Some(LayoutInfo::File(full_path.display().to_string()));
+                } else {
+                    layout_info = LayoutInfo::from_config(&layout_dir, &opts.layout);
+                }
+            } else {
+                layout_info = LayoutInfo::from_config(&layout_dir, &opts.layout);
+            }
+        }
 
         if let Some(reconnect_to_session) = &reconnect_to_session {
             // this is integration code to make session reconnects work with this existing,
