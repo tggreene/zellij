@@ -10,6 +10,7 @@ use zellij_utils::{
     envs,
     input::config::Config,
     logging::*,
+    sessions,
     setup::Setup,
     shared::web_server_base_url_from_config,
 };
@@ -241,22 +242,29 @@ fn main() {
             .cloned()
             .or_else(|| envs::get_session_name().ok())
         {
-            let config = Config::try_from(&opts).ok();
-            let options = Setup::from_cli_args(&opts).ok().map(|r| r.2);
-            let new_layout_cli_action = CliAction::NewTab {
-                layout: Some(layout.clone()),
-                layout_dir: options.as_ref().and_then(|o| o.layout_dir.clone()),
-                name: None,
-                cwd: options.as_ref().and_then(|o| o.default_cwd.clone()),
-                initial_command: vec![],
-                initial_plugin: None,
-                close_on_exit: Default::default(),
-                start_suspended: Default::default(),
-                block_until_exit_success: false,
-                block_until_exit_failure: false,
-                block_until_exit: false,
-            };
-            commands::send_action_to_session(new_layout_cli_action, Some(session_name), config);
+            // Check if session exists before trying to add a tab to it
+            if sessions::session_exists(&session_name).unwrap_or(false) {
+                // Session exists: add layout as new tab
+                let config = Config::try_from(&opts).ok();
+                let options = Setup::from_cli_args(&opts).ok().map(|r| r.2);
+                let new_layout_cli_action = CliAction::NewTab {
+                    layout: Some(layout.clone()),
+                    layout_dir: options.as_ref().and_then(|o| o.layout_dir.clone()),
+                    name: None,
+                    cwd: options.as_ref().and_then(|o| o.default_cwd.clone()),
+                    initial_command: vec![],
+                    initial_plugin: None,
+                    close_on_exit: Default::default(),
+                    start_suspended: Default::default(),
+                    block_until_exit_success: false,
+                    block_until_exit_failure: false,
+                    block_until_exit: false,
+                };
+                commands::send_action_to_session(new_layout_cli_action, Some(session_name), config);
+            } else {
+                // Session doesn't exist: create new session with layout
+                commands::start_client(opts);
+            }
         } else {
             commands::start_client(opts);
         }
