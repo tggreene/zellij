@@ -383,7 +383,10 @@ impl ClientSender {
         // We, the zellij maintainers, have decided against an unbounded
         // queue for the time being because we want to prevent e.g. the whole session being killed
         // (by OOM-killers or some other mechanism) just because a single client doesn't respond.
-        let (client_buffer_sender, client_buffer_receiver) = channels::bounded(5000);
+        //
+        // CUSTOM: Increased to 50000 to survive screen locks on macOS. Screen lock suspends terminal,
+        // causing messages to queue. 5000 was too small for longer locks (~8min). 50000 gives ~83min.
+        let (client_buffer_sender, client_buffer_receiver) = channels::bounded(50000);
         std::thread::spawn(move || {
             let err_context = || format!("failed to send message to client {client_id}");
             for msg in client_buffer_receiver.iter() {
