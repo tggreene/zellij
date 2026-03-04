@@ -428,6 +428,7 @@ pub enum ScreenInstruction {
     SerializeLayoutForResurrection,
     RenameSession(String, ClientId, Option<NotificationEnd>), // String -> new name
     ListClientsMetadata(Option<PathBuf>, ClientId, Option<NotificationEnd>), // Option<PathBuf> - default shell
+    ListPanes(ClientId, Option<NotificationEnd>),
     Reconfigure {
         client_id: ClientId,
         keybinds: Keybinds,
@@ -680,6 +681,7 @@ impl From<&ScreenInstruction> for ScreenContext {
             },
             ScreenInstruction::RenameSession(..) => ScreenContext::RenameSession,
             ScreenInstruction::ListClientsMetadata(..) => ScreenContext::ListClientsMetadata,
+            ScreenInstruction::ListPanes(..) => ScreenContext::ListPanes,
             ScreenInstruction::Reconfigure { .. } => ScreenContext::Reconfigure,
             ScreenInstruction::RerunCommandPane { .. } => ScreenContext::RerunCommandPane,
             ScreenInstruction::ResizePaneWithId(..) => ScreenContext::ResizePaneWithId,
@@ -4206,6 +4208,19 @@ pub(crate) fn screen_thread_main(
                     .bus
                     .senders
                     .send_to_plugin(PluginInstruction::ListClientsMetadata(
+                        session_layout_metadata,
+                        client_id,
+                        completion_tx,
+                    ))
+                    .with_context(err_context)?;
+            },
+            ScreenInstruction::ListPanes(client_id, completion_tx) => {
+                let err_context = || format!("Failed to list panes");
+                let session_layout_metadata = screen.get_layout_metadata(None);
+                screen
+                    .bus
+                    .senders
+                    .send_to_plugin(PluginInstruction::ListPanes(
                         session_layout_metadata,
                         client_id,
                         completion_tx,

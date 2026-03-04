@@ -319,6 +319,8 @@ pub mod action {
         NewBlockingPane(super::NewBlockingPaneAction),
         #[prost(message, tag="94")]
         OverrideLayout(super::OverrideLayoutAction),
+        #[prost(message, tag="97")]
+        ListPanes(super::ListPanesAction),
     }
 }
 // Action message definitions (all 92 variants)
@@ -505,6 +507,10 @@ pub struct BreakPaneLeftAction {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListClientsAction {
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListPanesAction {
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]

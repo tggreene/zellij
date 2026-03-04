@@ -127,6 +127,7 @@ pub enum PtyInstruction {
         Option<NotificationEnd>,
     ),
     ListClientsMetadata(SessionLayoutMetadata, ClientId, Option<NotificationEnd>),
+    ListPanes(SessionLayoutMetadata, ClientId, Option<NotificationEnd>),
     Reconfigure {
         client_id: ClientId,
         default_editor: Option<PathBuf>,
@@ -163,6 +164,7 @@ impl From<&PtyInstruction> for PtyContext {
             PtyInstruction::LogLayoutToHd(..) => PtyContext::LogLayoutToHd,
             PtyInstruction::FillPluginCwd(..) => PtyContext::FillPluginCwd,
             PtyInstruction::ListClientsMetadata(..) => PtyContext::ListClientsMetadata,
+            PtyInstruction::ListPanes(..) => PtyContext::ListPanes,
             PtyInstruction::Reconfigure { .. } => PtyContext::Reconfigure,
             PtyInstruction::ListClientsToPlugin(..) => PtyContext::ListClientsToPlugin,
             PtyInstruction::ReportPluginCwd(..) => PtyContext::ReportPluginCwd,
@@ -676,6 +678,25 @@ pub(crate) fn pty_thread_main(mut pty: Pty, layout: Box<Layout>) -> Result<()> {
                             "{}",
                             session_layout_metadata.list_clients_metadata(),
                         )],
+                        client_id,
+                        completion_tx,
+                    ))
+                    .with_context(err_context)
+                    .non_fatal();
+            },
+            PtyInstruction::ListPanes(
+                mut session_layout_metadata,
+                client_id,
+                completion_tx,
+            ) => {
+                let err_context = || format!("Failed to list panes");
+                pty.populate_session_layout_metadata(&mut session_layout_metadata);
+                let panes_json =
+                    session_layout_metadata.list_panes_metadata(&pty.id_to_child_pid);
+                pty.bus
+                    .senders
+                    .send_to_server(ServerInstruction::Log(
+                        vec![panes_json],
                         client_id,
                         completion_tx,
                     ))

@@ -1826,6 +1826,7 @@ impl TryFrom<Action> for ProtobufAction {
             | Action::Deny
             | Action::Copy
             | Action::DumpLayout
+            | Action::ListPanes
             | Action::CliPipe { .. }
             | Action::ListClients
             | Action::EjectClient { client_id: _ }

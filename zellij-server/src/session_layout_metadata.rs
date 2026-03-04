@@ -1,6 +1,7 @@
 use crate::panes::PaneId;
 use crate::ClientId;
 use std::collections::{BTreeMap, HashMap};
+use std::os::unix::io::RawFd;
 use std::path::PathBuf;
 use zellij_utils::common_path::common_path_all;
 use zellij_utils::pane_size::PaneGeom;
@@ -81,6 +82,71 @@ impl SessionLayoutMetadata {
         }
 
         ClientMetadata::render_many(clients_metadata, &self.default_editor)
+    }
+    pub fn list_panes_metadata(&self, id_to_child_pid: &HashMap<u32, RawFd>) -> String {
+        let mut panes = Vec::new();
+        for (tab_index, tab) in self.tabs.iter().enumerate() {
+            let tab_name = tab.name.clone().unwrap_or_default();
+            let is_tab_focused = tab.is_focused;
+
+            let mut process_panes = |pane_list: &[PaneLayoutMetadata], is_floating: bool| {
+                for pane in pane_list {
+                    let pane_id_str = match pane.id {
+                        PaneId::Terminal(id) => format!("terminal_{}", id),
+                        PaneId::Plugin(id) => format!("plugin_{}", id),
+                    };
+
+                    let pid = match pane.id {
+                        PaneId::Terminal(id) => id_to_child_pid.get(&id).copied(),
+                        PaneId::Plugin(_) => None,
+                    };
+
+                    let is_stacked = pane.geom.is_stacked();
+                    let is_expanded = if is_stacked {
+                        !pane.geom.rows.is_fixed()
+                    } else {
+                        false
+                    };
+
+                    let (command, args) = extract_command_and_args(&pane.run);
+                    let command_str = command.map(|c| {
+                        if args.is_empty() {
+                            c
+                        } else {
+                            format!("{} {}", c, args.join(" "))
+                        }
+                    });
+
+                    let cwd_str = pane.cwd.as_ref().map(|p| p.display().to_string());
+                    let title = pane.title.clone();
+
+                    let mut json = String::from("{");
+                    json.push_str(&format!("\"tab_name\":{},", json_string(&tab_name)));
+                    json.push_str(&format!("\"tab_index\":{},", tab_index));
+                    json.push_str(&format!("\"is_tab_focused\":{},", is_tab_focused));
+                    json.push_str(&format!("\"pane_id\":{},", json_string(&pane_id_str)));
+                    json.push_str(&format!("\"title\":{},", json_opt_string(&title)));
+                    json.push_str(&format!("\"command\":{},", json_opt_string(&command_str)));
+                    json.push_str(&format!("\"cwd\":{},", json_opt_string(&cwd_str)));
+                    json.push_str(&format!(
+                        "\"pid\":{},",
+                        pid.map_or("null".to_string(), |p| p.to_string())
+                    ));
+                    json.push_str(&format!("\"is_focused\":{},", pane.is_focused));
+                    json.push_str(&format!("\"is_stacked\":{},", is_stacked));
+                    json.push_str(&format!("\"is_expanded\":{},", is_expanded));
+                    json.push_str(&format!("\"is_floating\":{}", is_floating));
+                    json.push('}');
+
+                    panes.push(json);
+                }
+            };
+
+            process_panes(&tab.tiled_panes, false);
+            process_panes(&tab.floating_panes, true);
+        }
+
+        format!("[{}]", panes.join(","))
     }
     pub fn all_clients_metadata(&self) -> BTreeMap<ClientId, ClientMetadata> {
         let mut clients_metadata: BTreeMap<ClientId, ClientMetadata> = BTreeMap::new();
@@ -374,24 +440,24 @@ impl Into<PaneLayoutManifest> for PaneLayoutMetadata {
 
 #[derive(Default, Debug, Clone)]
 pub struct TabLayoutMetadata {
-    name: Option<String>,
-    tiled_panes: Vec<PaneLayoutMetadata>,
-    floating_panes: Vec<PaneLayoutMetadata>,
-    is_focused: bool,
-    hide_floating_panes: bool,
+    pub(crate) name: Option<String>,
+    pub(crate) tiled_panes: Vec<PaneLayoutMetadata>,
+    pub(crate) floating_panes: Vec<PaneLayoutMetadata>,
+    pub(crate) is_focused: bool,
+    pub(crate) hide_floating_panes: bool,
 }
 
 #[derive(Debug, Clone)]
 pub struct PaneLayoutMetadata {
-    id: PaneId,
-    geom: PaneGeom,
-    run: Option<Run>,
-    cwd: Option<PathBuf>,
-    is_borderless: bool,
-    title: Option<String>,
-    is_focused: bool,
-    pane_contents: Option<String>,
-    focused_clients: Vec<ClientId>,
+    pub(crate) id: PaneId,
+    pub(crate) geom: PaneGeom,
+    pub(crate) run: Option<Run>,
+    pub(crate) cwd: Option<PathBuf>,
+    pub(crate) is_borderless: bool,
+    pub(crate) title: Option<String>,
+    pub(crate) is_focused: bool,
+    pub(crate) pane_contents: Option<String>,
+    pub(crate) focused_clients: Vec<ClientId>,
 }
 
 impl PaneLayoutMetadata {
@@ -474,5 +540,23 @@ impl ClientMetadata {
             ));
         }
         lines.join("\n")
+    }
+}
+
+fn json_string(s: &str) -> String {
+    format!(
+        "\"{}\"",
+        s.replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n")
+            .replace('\r', "\\r")
+            .replace('\t', "\\t")
+    )
+}
+
+fn json_opt_string(s: &Option<String>) -> String {
+    match s {
+        Some(val) => json_string(val),
+        None => "null".to_string(),
     }
 }

@@ -695,6 +695,7 @@ impl Action {
                 Some(node)
             },
             Action::DumpLayout => Some(KdlNode::new("DumpLayout")),
+            Action::ListPanes => Some(KdlNode::new("ListPanes")),
             Action::EditScrollback => Some(KdlNode::new("EditScrollback")),
             Action::ScrollUp => Some(KdlNode::new("ScrollUp")),
             Action::ScrollDown => Some(KdlNode::new("ScrollDown")),

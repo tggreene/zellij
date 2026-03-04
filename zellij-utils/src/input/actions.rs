@@ -166,6 +166,8 @@ pub enum Action {
     },
     /// Dumps
     DumpLayout,
+    /// Lists all panes as JSON
+    ListPanes,
     /// Scroll up in focus pane.
     EditScrollback,
     ScrollUp,
@@ -509,6 +511,25 @@ impl Action {
             },
             CliAction::FocusNextPane => Ok(vec![Action::FocusNextPane]),
             CliAction::FocusPreviousPane => Ok(vec![Action::FocusPreviousPane]),
+            CliAction::FocusPaneWithId {
+                pane_id,
+                float_if_hidden,
+            } => {
+                let pane_id =
+                    PaneId::from_str(&pane_id).map_err(|e| format!("Invalid pane ID: {}", e))?;
+                match pane_id {
+                    PaneId::Terminal(id) => Ok(vec![Action::FocusTerminalPaneWithId {
+                        pane_id: id,
+                        should_float_if_hidden: float_if_hidden,
+                        should_be_in_place_if_hidden: false,
+                    }]),
+                    PaneId::Plugin(id) => Ok(vec![Action::FocusPluginPaneWithId {
+                        pane_id: id,
+                        should_float_if_hidden: float_if_hidden,
+                        should_be_in_place_if_hidden: false,
+                    }]),
+                }
+            },
             CliAction::MoveFocus { direction } => Ok(vec![Action::MoveFocus { direction }]),
             CliAction::MoveFocusOrTab { direction } => {
                 Ok(vec![Action::MoveFocusOrTab { direction }])
@@ -1167,6 +1188,7 @@ impl Action {
                 }])
             },
             CliAction::ListClients => Ok(vec![Action::ListClients]),
+            CliAction::ListPanes => Ok(vec![Action::ListPanes]),
             CliAction::EjectClient { client_id } => Ok(vec![Action::EjectClient { client_id }]),
             CliAction::EjectAllOtherClients => Ok(vec![Action::EjectAllOtherClients]),
             CliAction::TogglePanePinned => Ok(vec![Action::TogglePanePinned]),

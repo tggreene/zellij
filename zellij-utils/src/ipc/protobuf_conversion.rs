@@ -718,7 +718,7 @@ impl From<crate::input::actions::Action>
             FocusPluginPaneWithIdAction, FocusPreviousPaneAction, FocusTerminalPaneWithIdAction,
             GoToNextTabAction, GoToPreviousTabAction, GoToTabAction, GoToTabNameAction,
             HalfPageScrollDownAction, HalfPageScrollUpAction, KeybindPipeAction,
-            LaunchOrFocusPluginAction, LaunchPluginAction, ListClientsAction, EjectClientAction,
+            LaunchOrFocusPluginAction, LaunchPluginAction, ListClientsAction, ListPanesAction, EjectClientAction,
             EjectAllOtherClientsAction, MouseEventAction,
             MoveFocusAction, MoveFocusOrTabAction, MovePaneAction, MovePaneBackwardsAction,
             MoveTabAction, NewBlockingPaneAction, NewFloatingPaneAction,
@@ -1276,6 +1276,9 @@ impl From<crate::input::actions::Action>
             }),
             crate::input::actions::Action::ListClients => {
                 ActionType::ListClients(ListClientsAction {})
+            },
+            crate::input::actions::Action::ListPanes => {
+                ActionType::ListPanes(ListPanesAction {})
             },
             crate::input::actions::Action::EjectClient { client_id } => {
                 ActionType::EjectClient(EjectClientAction {
@@ -1899,6 +1902,7 @@ impl TryFrom<crate::client_server_contract::client_server_contract::Action>
                 })
             },
             ActionType::ListClients(_) => Ok(crate::input::actions::Action::ListClients),
+            ActionType::ListPanes(_) => Ok(crate::input::actions::Action::ListPanes),
             ActionType::EjectClient(eject_client_action) => {
                 Ok(crate::input::actions::Action::EjectClient {
                     client_id: eject_client_action.client_id as u16,

@@ -140,6 +140,7 @@ pub enum PluginInstruction {
     ),
     DumpLayout(SessionLayoutMetadata, ClientId, Option<NotificationEnd>),
     ListClientsMetadata(SessionLayoutMetadata, ClientId, Option<NotificationEnd>),
+    ListPanes(SessionLayoutMetadata, ClientId, Option<NotificationEnd>),
     DumpLayoutToPlugin(SessionLayoutMetadata, PluginId),
     LogLayoutToHd(SessionLayoutMetadata),
     CliPipe {
@@ -234,6 +235,7 @@ impl From<&PluginInstruction> for PluginContext {
             },
             PluginInstruction::DumpLayout(..) => PluginContext::DumpLayout,
             PluginInstruction::ListClientsMetadata(..) => PluginContext::ListClientsMetadata,
+            PluginInstruction::ListPanes(..) => PluginContext::ListPanes,
             PluginInstruction::LogLayoutToHd(..) => PluginContext::LogLayoutToHd,
             PluginInstruction::CliPipe { .. } => PluginContext::CliPipe,
             PluginInstruction::CachePluginEvents { .. } => PluginContext::CachePluginEvents,
@@ -774,6 +776,22 @@ pub(crate) fn plugin_thread_main(
                     &plugin_aliases,
                 );
                 drop(bus.senders.send_to_pty(PtyInstruction::ListClientsMetadata(
+                    session_layout_metadata,
+                    client_id,
+                    completion_tx,
+                )));
+            },
+            PluginInstruction::ListPanes(
+                mut session_layout_metadata,
+                client_id,
+                completion_tx,
+            ) => {
+                populate_session_layout_metadata(
+                    &mut session_layout_metadata,
+                    &wasm_bridge,
+                    &plugin_aliases,
+                );
+                drop(bus.senders.send_to_pty(PtyInstruction::ListPanes(
                     session_layout_metadata,
                     client_id,
                     completion_tx,

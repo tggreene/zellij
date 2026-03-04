@@ -602,6 +602,13 @@ pub enum CliAction {
     FocusNextPane,
     /// Change focus to the previous pane
     FocusPreviousPane,
+    /// Focus a pane by its ID (eg. terminal_1, plugin_2, or bare integer like 1)
+    FocusPaneWithId {
+        pane_id: String,
+        /// Float the pane if it is currently hidden
+        #[clap(short, long, value_parser, default_value("false"), takes_value(false))]
+        float_if_hidden: bool,
+    },
     /// Move the focused pane in the specified direction. [right|left|up|down]
     MoveFocus {
         direction: Direction,
@@ -1061,6 +1068,8 @@ tail -f /tmp/my-live-logfile | zellij action pipe --name logs --plugin https://e
         plugin_title: Option<String>,
     },
     ListClients,
+    /// List all panes with their IDs, titles, and metadata as JSON
+    ListPanes,
     /// Eject a specific client from the session by client ID
     EjectClient {
         /// The client ID to eject (use list-clients to see IDs)

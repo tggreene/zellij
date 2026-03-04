@@ -232,6 +232,7 @@ message Action {
     SwitchSessionAction switch_session = 92;
     NewBlockingPaneAction new_blocking_pane = 93;
     OverrideLayoutAction override_layout = 94;
+    ListPanesAction list_panes = 97;
   }
 }
 
@@ -288,6 +289,7 @@ message BreakPaneAction {}
 message BreakPaneRightAction {}
 message BreakPaneLeftAction {}
 message ListClientsAction {}
+message ListPanesAction {}
 message EjectClientAction {
   uint32 client_id = 1;
 }

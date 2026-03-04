@@ -1499,6 +1499,14 @@ pub(crate) fn route_action(
                 ))
                 .with_context(err_context)?;
         },
+        Action::ListPanes => {
+            senders
+                .send_to_screen(ScreenInstruction::ListPanes(
+                    cli_client_id.unwrap_or(client_id),
+                    Some(NotificationEnd::new(completion_tx)),
+                ))
+                .with_context(err_context)?;
+        },
         Action::EjectClient {
             client_id: target_client_id,
         } => {
