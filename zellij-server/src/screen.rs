@@ -12,9 +12,9 @@ use crate::route::NotificationEnd;
 
 use log::{debug, warn};
 use zellij_utils::data::{
-    CommandOrPlugin, Direction, FloatingPaneCoordinates, KeyWithModifier, NewPanePlacement,
-    PaneContents, PaneManifest, PaneScrollbackResponse, PluginPermission, Resize, ResizeStrategy,
-    SessionInfo, Styling, WebSharing,
+    CommandOrPlugin, Direction, FloatingPaneCoordinates, KeyWithModifier, LayoutInfo,
+    NewPanePlacement, PaneContents, PaneManifest, PaneScrollbackResponse, PluginPermission, Resize,
+    ResizeStrategy, SessionInfo, Styling, WebSharing,
 };
 use zellij_utils::errors::prelude::*;
 use zellij_utils::input::command::RunCommand;
@@ -924,6 +924,7 @@ pub(crate) struct Screen {
     render_blocker: RenderBlocker,
     watcher_clients: HashMap<ClientId, WatcherState>,
     followed_client_id: Option<ClientId>,
+    cached_available_layouts: Vec<LayoutInfo>,
 }
 
 impl Screen {
@@ -957,6 +958,8 @@ impl Screen {
         web_server_port: u16,
     ) -> Self {
         let session_name = mode_info.session_name.clone().unwrap_or_default();
+        let cached_available_layouts =
+            Layout::list_available_layouts(layout_dir.clone(), &default_layout_name);
         let session_info = SessionInfo::new(session_name.clone());
         let mut session_infos_on_machine = BTreeMap::new();
         let resurrectable_sessions = BTreeMap::new();
@@ -1008,6 +1011,7 @@ impl Screen {
             web_server_port,
             render_blocker: RenderBlocker::new(100),
             watcher_clients: HashMap::new(),
+            cached_available_layouts,
             followed_client_id: None,
         }
     }
@@ -2085,14 +2089,7 @@ impl Screen {
         // generate own session info
         let pane_manifest = self.generate_and_report_pane_state()?;
         let tab_infos = self.generate_and_report_tab_state()?;
-        // in the context of unit/integration tests, we don't need to list available layouts
-        // because this is mostly about HD access - it does however throw off the timing in the
-        // tests and causes them to flake, which is why we skip it here
-        #[cfg(not(test))]
-        let available_layouts =
-            Layout::list_available_layouts(self.layout_dir.clone(), &self.default_layout_name);
-        #[cfg(test)]
-        let available_layouts = vec![];
+        let available_layouts = self.cached_available_layouts.clone();
         let session_info = SessionInfo {
             name: self.session_name.clone(),
             tabs: tab_infos,
