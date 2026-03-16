@@ -345,6 +345,7 @@ pub struct Grid {
     pub pending_messages_to_pty: Vec<Vec<u8>>,
     pub selection: Selection,
     pub title: Option<String>,
+    pub secondary_title: Option<String>,
     pub is_scrolled: bool,
     pub link_handler: Rc<RefCell<LinkHandler>>,
     pub ring_bell: bool,
@@ -530,6 +531,7 @@ impl Grid {
             selection: Default::default(),
             title_stack: vec![],
             title: None,
+            secondary_title: None,
             changed_colors: None,
             is_scrolled: false,
             link_handler,
@@ -2591,6 +2593,24 @@ impl Perform for Grid {
                         .trim()
                         .to_owned();
                     self.set_title(title);
+                }
+            },
+
+            // Set secondary title (custom OSC 7777).
+            b"7777" => {
+                if params.len() >= 2 {
+                    let title = params[1..]
+                        .iter()
+                        .flat_map(|x| str::from_utf8(x))
+                        .collect::<Vec<&str>>()
+                        .join(";")
+                        .trim()
+                        .to_owned();
+                    if title.is_empty() {
+                        self.secondary_title = None;
+                    } else {
+                        self.secondary_title = Some(title);
+                    }
                 }
             },
 

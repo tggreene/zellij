@@ -375,12 +375,19 @@ impl Pane for TerminalPane {
             }
             format!("SEARCHING: {}{}", self.search_term, modifier_text)
         } else if self.pane_name.is_empty() {
-            self.grid
+            let base_title = self.grid
                 .title
                 .clone()
-                .unwrap_or_else(|| self.pane_title.clone())
+                .unwrap_or_else(|| self.pane_title.clone());
+            match &self.grid.secondary_title {
+                Some(secondary) => format!("{} | {}", secondary, base_title),
+                None => base_title,
+            }
         } else {
-            self.pane_name.clone()
+            match &self.grid.secondary_title {
+                Some(secondary) => format!("{} | {}", secondary, self.pane_name),
+                None => self.pane_name.clone(),
+            }
         };
 
         let frame_geom = self.current_geom();
@@ -782,7 +789,7 @@ impl Pane for TerminalPane {
         self.pane_title = title;
     }
     fn current_title(&self) -> String {
-        if self.pane_name.is_empty() {
+        let base = if self.pane_name.is_empty() {
             self.grid
                 .title
                 .as_deref()
@@ -790,6 +797,10 @@ impl Pane for TerminalPane {
                 .into()
         } else {
             self.pane_name.to_owned()
+        };
+        match &self.grid.secondary_title {
+            Some(secondary) => format!("{} | {}", secondary, base),
+            None => base,
         }
     }
     fn custom_title(&self) -> Option<String> {
