@@ -3900,3 +3900,51 @@ fn cannot_escape_scroll_region() {
     }
     assert_snapshot!(format!("{:?}", grid));
 }
+
+#[test]
+fn osc_7777_sets_secondary_title() {
+    let mut vte_parser = vte::Parser::new();
+    let sixel_image_store = Rc::new(RefCell::new(SixelImageStore::default()));
+    let terminal_emulator_color_codes = Rc::new(RefCell::new(HashMap::new()));
+    let debug = false;
+    let arrow_fonts = true;
+    let styled_underlines = true;
+    let explicitly_disable_kitty_keyboard_protocol = false;
+    let mut grid = Grid::new(
+        24,
+        80,
+        Rc::new(RefCell::new(Palette::default())),
+        terminal_emulator_color_codes,
+        Rc::new(RefCell::new(LinkHandler::new())),
+        Rc::new(RefCell::new(None)),
+        sixel_image_store,
+        Style::default(),
+        debug,
+        arrow_fonts,
+        styled_underlines,
+        explicitly_disable_kitty_keyboard_protocol,
+    );
+
+    assert_eq!(grid.secondary_title, None);
+
+    // BEL-terminated: \e]7777;title;my vibe\a
+    let content = "\x1b]7777;title;my vibe\x07".as_bytes();
+    for byte in content {
+        vte_parser.advance(&mut grid, *byte);
+    }
+    assert_eq!(grid.secondary_title, Some("title;my vibe".to_string()));
+
+    // ST-terminated: \e]7777;title;another vibe\e\\
+    let content = "\x1b]7777;title;another vibe\x1b\\".as_bytes();
+    for byte in content {
+        vte_parser.advance(&mut grid, *byte);
+    }
+    assert_eq!(grid.secondary_title, Some("title;another vibe".to_string()));
+
+    // Clear secondary title with empty value
+    let content = "\x1b]7777;\x07".as_bytes();
+    for byte in content {
+        vte_parser.advance(&mut grid, *byte);
+    }
+    assert_eq!(grid.secondary_title, None);
+}
