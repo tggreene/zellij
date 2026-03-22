@@ -3927,19 +3927,26 @@ fn osc_7777_sets_secondary_title() {
 
     assert_eq!(grid.secondary_title, None);
 
-    // BEL-terminated: \e]7777;title;my vibe\a
+    // With "title" sub-command (BEL-terminated): \e]7777;title;my vibe\a
     let content = "\x1b]7777;title;my vibe\x07".as_bytes();
     for byte in content {
         vte_parser.advance(&mut grid, *byte);
     }
-    assert_eq!(grid.secondary_title, Some("title;my vibe".to_string()));
+    assert_eq!(grid.secondary_title, Some("my vibe".to_string()));
+
+    // Without "title" sub-command (direct): \e]7777;direct title\a
+    let content = "\x1b]7777;direct title\x07".as_bytes();
+    for byte in content {
+        vte_parser.advance(&mut grid, *byte);
+    }
+    assert_eq!(grid.secondary_title, Some("direct title".to_string()));
 
     // ST-terminated: \e]7777;title;another vibe\e\\
     let content = "\x1b]7777;title;another vibe\x1b\\".as_bytes();
     for byte in content {
         vte_parser.advance(&mut grid, *byte);
     }
-    assert_eq!(grid.secondary_title, Some("title;another vibe".to_string()));
+    assert_eq!(grid.secondary_title, Some("another vibe".to_string()));
 
     // Clear secondary title with empty value
     let content = "\x1b]7777;\x07".as_bytes();

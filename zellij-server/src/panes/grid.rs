@@ -2597,9 +2597,15 @@ impl Perform for Grid {
             },
 
             // Set secondary title (custom OSC 7777).
+            // Supports: \e]7777;my title\a  or  \e]7777;title;my title\a
             b"7777" => {
                 if params.len() >= 2 {
-                    let title = params[1..]
+                    let start = if params.len() >= 3 && params[1] == b"title" {
+                        2
+                    } else {
+                        1
+                    };
+                    let title = params[start..]
                         .iter()
                         .flat_map(|x| str::from_utf8(x))
                         .collect::<Vec<&str>>()
