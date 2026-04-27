@@ -925,6 +925,8 @@ pub(crate) struct Screen {
     watcher_clients: HashMap<ClientId, WatcherState>,
     followed_client_id: Option<ClientId>,
     cached_available_layouts: Vec<LayoutInfo>,
+    last_reported_pane_manifest: Option<PaneManifest>,
+    last_reported_tab_state: BTreeMap<ClientId, Vec<TabInfo>>,
 }
 
 impl Screen {
@@ -1013,6 +1015,8 @@ impl Screen {
             watcher_clients: HashMap::new(),
             cached_available_layouts,
             followed_client_id: None,
+            last_reported_pane_manifest: None,
+            last_reported_tab_state: BTreeMap::new(),
         }
     }
 
@@ -1983,87 +1987,133 @@ impl Screen {
     }
 
     pub fn generate_and_report_tab_state(&mut self) -> Result<Vec<TabInfo>> {
-        let mut plugin_updates = vec![];
+        // Compute per-tab data once and reuse for both screen state and per-client plugin updates.
+        struct TabComputed {
+            position: usize,
+            name: String,
+            tab_index: usize,
+            panes_to_hide: usize,
+            is_fullscreen_active: bool,
+            is_sync_panes_active: bool,
+            are_floating_panes_visible: bool,
+            active_swap_layout_name: Option<String>,
+            is_swap_layout_dirty: bool,
+            viewport_rows: usize,
+            viewport_columns: usize,
+            display_area_rows: usize,
+            display_area_columns: usize,
+            selectable_tiled_panes_count: usize,
+            selectable_floating_panes_count: usize,
+        }
+
+        let mut tabs_computed: Vec<TabComputed> = Vec::with_capacity(self.tabs.len());
         let mut tab_infos_for_screen_state = BTreeMap::new();
         for tab in self.tabs.values() {
-            let all_focused_clients: Vec<ClientId> = self
-                .active_tab_indices
-                .iter()
-                .filter(|(_c_id, tab_position)| **tab_position == tab.index)
-                .map(|(c_id, _)| c_id)
-                .copied()
-                .collect();
             let (active_swap_layout_name, is_swap_layout_dirty) = tab.swap_layout_info();
             let tab_viewport = tab.get_viewport();
             let tab_display_area = tab.get_display_area();
-            let selectable_tiled_panes_count = tab.get_selectable_tiled_panes_count();
-            let selectable_floating_panes_count = tab.get_selectable_floating_panes_count();
-            let tab_info_for_screen = TabInfo {
+            let computed = TabComputed {
                 position: tab.position,
                 name: tab.name.clone(),
-                active: self.active_tab_indices.values().any(|i| i == &tab.index),
+                tab_index: tab.index,
                 panes_to_hide: tab.panes_to_hide_count(),
                 is_fullscreen_active: tab.is_fullscreen_active(),
                 is_sync_panes_active: tab.is_sync_panes_active(),
                 are_floating_panes_visible: tab.are_floating_panes_visible(),
-                other_focused_clients: all_focused_clients,
                 active_swap_layout_name,
                 is_swap_layout_dirty,
                 viewport_rows: tab_viewport.rows,
                 viewport_columns: tab_viewport.cols,
                 display_area_rows: tab_display_area.rows,
                 display_area_columns: tab_display_area.cols,
-                selectable_tiled_panes_count,
-                selectable_floating_panes_count,
+                selectable_tiled_panes_count: tab.get_selectable_tiled_panes_count(),
+                selectable_floating_panes_count: tab.get_selectable_floating_panes_count(),
             };
-            tab_infos_for_screen_state.insert(tab.position, tab_info_for_screen);
+            let all_focused_clients: Vec<ClientId> = self
+                .active_tab_indices
+                .iter()
+                .filter(|(_c_id, tab_position)| **tab_position == computed.tab_index)
+                .map(|(c_id, _)| c_id)
+                .copied()
+                .collect();
+            let tab_info_for_screen = TabInfo {
+                position: computed.position,
+                name: computed.name.clone(),
+                active: !all_focused_clients.is_empty(),
+                panes_to_hide: computed.panes_to_hide,
+                is_fullscreen_active: computed.is_fullscreen_active,
+                is_sync_panes_active: computed.is_sync_panes_active,
+                are_floating_panes_visible: computed.are_floating_panes_visible,
+                other_focused_clients: all_focused_clients,
+                active_swap_layout_name: computed.active_swap_layout_name.clone(),
+                is_swap_layout_dirty: computed.is_swap_layout_dirty,
+                viewport_rows: computed.viewport_rows,
+                viewport_columns: computed.viewport_columns,
+                display_area_rows: computed.display_area_rows,
+                display_area_columns: computed.display_area_columns,
+                selectable_tiled_panes_count: computed.selectable_tiled_panes_count,
+                selectable_floating_panes_count: computed.selectable_floating_panes_count,
+            };
+            tab_infos_for_screen_state.insert(computed.position, tab_info_for_screen);
+            tabs_computed.push(computed);
         }
+        let mut plugin_updates = vec![];
+        let mut current_tab_state: BTreeMap<ClientId, Vec<TabInfo>> = BTreeMap::new();
         for (client_id, active_tab_index) in self.active_tab_indices.iter() {
-            let mut plugin_tab_updates = vec![];
-            for tab in self.tabs.values() {
+            let mut plugin_tab_updates = Vec::with_capacity(tabs_computed.len());
+            for computed in &tabs_computed {
                 let other_focused_clients: Vec<ClientId> = if self.session_is_mirrored {
                     vec![]
                 } else {
                     self.active_tab_indices
                         .iter()
                         .filter(|(c_id, tab_position)| {
-                            **tab_position == tab.index && *c_id != client_id
+                            **tab_position == computed.tab_index && *c_id != client_id
                         })
                         .map(|(c_id, _)| c_id)
                         .copied()
                         .collect()
                 };
-                let (active_swap_layout_name, is_swap_layout_dirty) = tab.swap_layout_info();
-                let tab_viewport = tab.get_viewport();
-                let tab_display_area = tab.get_display_area();
-                let selectable_tiled_panes_count = tab.get_selectable_tiled_panes_count();
-                let selectable_floating_panes_count = tab.get_selectable_floating_panes_count();
-                let tab_info_for_plugins = TabInfo {
-                    position: tab.position,
-                    name: tab.name.clone(),
-                    active: *active_tab_index == tab.index,
-                    panes_to_hide: tab.panes_to_hide_count(),
-                    is_fullscreen_active: tab.is_fullscreen_active(),
-                    is_sync_panes_active: tab.is_sync_panes_active(),
-                    are_floating_panes_visible: tab.are_floating_panes_visible(),
+                plugin_tab_updates.push(TabInfo {
+                    position: computed.position,
+                    name: computed.name.clone(),
+                    active: *active_tab_index == computed.tab_index,
+                    panes_to_hide: computed.panes_to_hide,
+                    is_fullscreen_active: computed.is_fullscreen_active,
+                    is_sync_panes_active: computed.is_sync_panes_active,
+                    are_floating_panes_visible: computed.are_floating_panes_visible,
                     other_focused_clients,
-                    active_swap_layout_name,
-                    is_swap_layout_dirty,
-                    viewport_rows: tab_viewport.rows,
-                    viewport_columns: tab_viewport.cols,
-                    display_area_rows: tab_display_area.rows,
-                    display_area_columns: tab_display_area.cols,
-                    selectable_tiled_panes_count,
-                    selectable_floating_panes_count,
-                };
-                plugin_tab_updates.push(tab_info_for_plugins);
+                    active_swap_layout_name: computed.active_swap_layout_name.clone(),
+                    is_swap_layout_dirty: computed.is_swap_layout_dirty,
+                    viewport_rows: computed.viewport_rows,
+                    viewport_columns: computed.viewport_columns,
+                    display_area_rows: computed.display_area_rows,
+                    display_area_columns: computed.display_area_columns,
+                    selectable_tiled_panes_count: computed.selectable_tiled_panes_count,
+                    selectable_floating_panes_count: computed.selectable_floating_panes_count,
+                });
             }
-            plugin_updates.push((None, Some(*client_id), Event::TabUpdate(plugin_tab_updates)));
+            let unchanged = self
+                .last_reported_tab_state
+                .get(client_id)
+                .map(|prev| prev == &plugin_tab_updates)
+                .unwrap_or(false);
+            if !unchanged {
+                plugin_updates.push((
+                    None,
+                    Some(*client_id),
+                    Event::TabUpdate(plugin_tab_updates.clone()),
+                ));
+            }
+            current_tab_state.insert(*client_id, plugin_tab_updates);
         }
-        self.bus
-            .senders
-            .send_to_plugin(PluginInstruction::Update(plugin_updates))
-            .context("failed to update tabs")?;
+        self.last_reported_tab_state = current_tab_state;
+        if !plugin_updates.is_empty() {
+            self.bus
+                .senders
+                .send_to_plugin(PluginInstruction::Update(plugin_updates))
+                .context("failed to update tabs")?;
+        }
         Ok(tab_infos_for_screen_state.values().cloned().collect())
     }
     fn generate_and_report_pane_state(&mut self) -> Result<PaneManifest> {
@@ -2071,14 +2121,22 @@ impl Screen {
         for tab in self.tabs.values() {
             pane_manifest.panes.insert(tab.position, tab.pane_infos());
         }
-        self.bus
-            .senders
-            .send_to_plugin(PluginInstruction::Update(vec![(
-                None,
-                None,
-                Event::PaneUpdate(pane_manifest.clone()),
-            )]))
-            .context("failed to update tabs")?;
+        let unchanged = self
+            .last_reported_pane_manifest
+            .as_ref()
+            .map(|prev| prev == &pane_manifest)
+            .unwrap_or(false);
+        if !unchanged {
+            self.bus
+                .senders
+                .send_to_plugin(PluginInstruction::Update(vec![(
+                    None,
+                    None,
+                    Event::PaneUpdate(pane_manifest.clone()),
+                )]))
+                .context("failed to update tabs")?;
+            self.last_reported_pane_manifest = Some(pane_manifest.clone());
+        }
 
         Ok(pane_manifest)
     }
