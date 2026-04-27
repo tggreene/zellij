@@ -221,7 +221,7 @@ keybinds {
         bind "Ctrl t" { SwitchToMode "Tab"; }
     }
     shared_except "tabjump" "locked" {
-        bind "Alt j" { SwitchToMode "TabJump"; }
+        bind "Alt Shift j" { SwitchToMode "TabJump"; }
     }
     shared_except "move" "locked" {
         bind "Ctrl h" { SwitchToMode "Move"; }

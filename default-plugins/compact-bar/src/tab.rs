@@ -27,6 +27,7 @@ pub fn render_tab(
     is_alternate_tab: bool,
     palette: Styling,
     separator: &str,
+    hint: Option<char>,
 ) -> LinePart {
     let focused_clients = tab.other_focused_clients.as_slice();
     let separator_width = separator.width();
@@ -47,13 +48,61 @@ pub fn render_tab(
     } else {
         palette.ribbon_unselected.base
     };
+    let hint_color = if tab.active {
+        palette.ribbon_selected.emphasis_0
+    } else {
+        palette.ribbon_unselected.emphasis_0
+    };
     let separator_fill_color = palette.text_unselected.background;
     let left_separator = style!(separator_fill_color, background_color).paint(separator);
-    let mut tab_text_len = text.width() + (separator_width * 2) + 2; // + 2 for padding
 
-    let tab_styled_text = style!(foreground_color, background_color)
-        .bold()
-        .paint(format!(" {} ", text));
+    // Build the inner styled text (with optional hint highlight) and track its visible width.
+    let (inner_styled, inner_width) = match hint {
+        None => {
+            let s = style!(foreground_color, background_color)
+                .bold()
+                .paint(format!(" {} ", text))
+                .to_string();
+            (s, text.width() + 2)
+        },
+        Some(hint_char) => {
+            // Try to find the hint char (case-insensitive) inline in the tab name.
+            let lower_hint = hint_char.to_ascii_lowercase();
+            let inline_idx = text
+                .char_indices()
+                .find(|(_, c)| c.to_ascii_lowercase() == lower_hint)
+                .map(|(i, _)| i);
+            let normal = style!(foreground_color, background_color).bold();
+            let highlight = style!(hint_color, background_color).bold();
+            match inline_idx {
+                Some(idx) => {
+                    // Highlight just that single char in place.
+                    let (before, rest) = text.split_at(idx);
+                    let mut chars = rest.chars();
+                    let hint_in_name = chars.next().unwrap();
+                    let after: String = chars.collect();
+                    let mut s = String::new();
+                    s.push_str(&normal.paint(" ").to_string());
+                    s.push_str(&normal.paint(before.to_string()).to_string());
+                    s.push_str(&highlight.paint(hint_in_name.to_string()).to_string());
+                    s.push_str(&normal.paint(after).to_string());
+                    s.push_str(&normal.paint(" ").to_string());
+                    (s, text.width() + 2)
+                },
+                None => {
+                    // Hint not present in name — prefix the name with the highlighted hint.
+                    let mut s = String::new();
+                    s.push_str(&normal.paint(" ").to_string());
+                    s.push_str(&highlight.paint(hint_char.to_string()).to_string());
+                    s.push_str(&normal.paint(format!(" {} ", text)).to_string());
+                    (s, text.width() + 4) // prefix is "<hint> " (2 chars) plus original 2 padding
+                },
+            }
+        },
+    };
+    let mut tab_text_len = inner_width + (separator_width * 2);
+
+    let tab_styled_text = inner_styled;
 
     let right_separator = style!(background_color, separator_fill_color).paint(separator);
     let tab_styled_text = if !focused_clients.is_empty() {
@@ -71,14 +120,18 @@ pub fn render_tab(
             .paint("]")
             .to_string();
         s.push_str(&left_separator.to_string());
-        s.push_str(&tab_styled_text.to_string());
+        s.push_str(&tab_styled_text);
         s.push_str(&cursor_beginning);
         s.push_str(&cursor_section);
         s.push_str(&cursor_end);
         s.push_str(&right_separator.to_string());
         s
     } else {
-        ANSIStrings(&[left_separator, tab_styled_text, right_separator]).to_string()
+        let mut s = String::new();
+        s.push_str(&left_separator.to_string());
+        s.push_str(&tab_styled_text);
+        s.push_str(&right_separator.to_string());
+        s
     };
 
     LinePart {
@@ -94,6 +147,7 @@ pub fn tab_style(
     mut is_alternate_tab: bool,
     palette: Styling,
     capabilities: PluginCapabilities,
+    hint: Option<char>,
 ) -> LinePart {
     let separator = tab_separator(capabilities);
 
@@ -107,7 +161,7 @@ pub fn tab_style(
         is_alternate_tab = false;
     }
 
-    render_tab(tabname, tab, is_alternate_tab, palette, separator)
+    render_tab(tabname, tab, is_alternate_tab, palette, separator, hint)
 }
 
 pub(crate) fn get_tab_to_focus(

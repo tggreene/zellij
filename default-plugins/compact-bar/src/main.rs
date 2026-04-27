@@ -515,7 +515,28 @@ impl State {
         let mut is_swap_layout_dirty = false;
         let mut is_alternate_tab = false;
 
-        for tab in &self.tabs {
+        let hints: Vec<Option<char>> = if self.mode_info.mode == InputMode::TabJump {
+            // Compute hints over tabs sorted by position, mirroring the server's algorithm,
+            // then map back to self.tabs order.
+            let mut by_position: Vec<(usize, &TabInfo)> =
+                self.tabs.iter().map(|t| (t.position, t)).collect();
+            by_position.sort_by_key(|(p, _)| *p);
+            let names: Vec<&str> = by_position.iter().map(|(_, t)| t.name.as_str()).collect();
+            let position_hints = assign_tab_hints(&names);
+            self.tabs
+                .iter()
+                .map(|tab| {
+                    by_position
+                        .iter()
+                        .position(|(p, _)| *p == tab.position)
+                        .and_then(|i| position_hints.get(i).copied().flatten())
+                })
+                .collect()
+        } else {
+            vec![None; self.tabs.len()]
+        };
+
+        for (i, tab) in self.tabs.iter().enumerate() {
             let tab_name = self.get_tab_display_name(tab);
 
             if tab.active {
@@ -532,6 +553,7 @@ impl State {
                 is_alternate_tab,
                 self.mode_info.style.colors,
                 self.mode_info.capabilities,
+                hints.get(i).copied().flatten(),
             );
 
             is_alternate_tab = !is_alternate_tab;
