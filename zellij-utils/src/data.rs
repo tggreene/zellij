@@ -1146,6 +1146,9 @@ pub enum InputMode {
     /// `Tmux` mode allows for basic tmux keybindings functionality
     #[serde(alias = "tmux")]
     Tmux,
+    /// `TabJump` mode allows jumping to a tab by pressing a hint character (easymotion-style)
+    #[serde(alias = "tabjump")]
+    TabJump,
 }
 
 impl Default for InputMode {
@@ -1236,6 +1239,7 @@ impl FromStr for InputMode {
             "move" | "Move" => Ok(InputMode::Move),
             "prompt" | "Prompt" => Ok(InputMode::Prompt),
             "tmux" | "Tmux" => Ok(InputMode::Tmux),
+            "tabjump" | "TabJump" => Ok(InputMode::TabJump),
             "entersearch" | "Entersearch" | "EnterSearch" => Ok(InputMode::EnterSearch),
             e => Err(ConversionError::UnknownInputMode(e.into())),
         }

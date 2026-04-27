@@ -293,6 +293,7 @@ pub enum ScreenContext {
     GoToTab,
     GoToTabName,
     UpdateTabName,
+    TabJumpInput,
     UndoRenameTab,
     MoveTabLeft,
     MoveTabRight,

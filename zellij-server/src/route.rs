@@ -951,6 +951,15 @@ pub(crate) fn route_action(
                 ))
                 .with_context(err_context)?;
         },
+        Action::TabJumpInput { input } => {
+            senders
+                .send_to_screen(ScreenInstruction::TabJumpInput(
+                    input,
+                    client_id,
+                    Some(NotificationEnd::new(completion_tx)),
+                ))
+                .with_context(err_context)?;
+        },
         Action::UndoRenameTab => {
             senders
                 .send_to_screen(ScreenInstruction::UndoRenameTab(

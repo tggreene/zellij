@@ -8,6 +8,7 @@ pub mod mouse;
 pub mod options;
 pub mod permission;
 pub mod plugins;
+pub mod tab_jump;
 pub mod theme;
 pub mod web_client;
 

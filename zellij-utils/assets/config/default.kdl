@@ -52,7 +52,8 @@ keybinds {
         bind "Ctrl t" { SwitchToMode "Normal"; }
         bind "r" { SwitchToMode "RenameTab"; TabNameInput 0; }
         bind "h" "Left" "Up" "k" { GoToPreviousTab; }
-        bind "l" "Right" "Down" "j" { GoToNextTab; }
+        bind "l" "Right" "Down" { GoToNextTab; }
+        bind "j" { SwitchToMode "TabJump"; }
         bind "n" { NewTab; SwitchToMode "Normal"; }
         bind "x" { CloseTab; SwitchToMode "Normal"; }
         bind "s" { ToggleActiveSyncTab; SwitchToMode "Normal"; }
@@ -110,6 +111,9 @@ keybinds {
     renamepane {
         bind "Ctrl c" { SwitchToMode "Normal"; }
         bind "Esc" { UndoRenamePane; SwitchToMode "Pane"; }
+    }
+    tabjump {
+        bind "Esc" "Ctrl c" { SwitchToMode "Normal"; }
     }
     session {
         bind "Ctrl o" { SwitchToMode "Normal"; }
@@ -213,8 +217,11 @@ keybinds {
     shared_except "session" "locked" {
         bind "Ctrl o" { SwitchToMode "Session"; }
     }
-    shared_except "tab" "locked" {
+    shared_except "tab" "tabjump" "locked" {
         bind "Ctrl t" { SwitchToMode "Tab"; }
+    }
+    shared_except "tabjump" "locked" {
+        bind "Alt j" { SwitchToMode "TabJump"; }
     }
     shared_except "move" "locked" {
         bind "Ctrl h" { SwitchToMode "Move"; }

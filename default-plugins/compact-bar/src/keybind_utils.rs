@@ -732,7 +732,8 @@ impl KeybindProcessor {
             | InputMode::RenameTab
             | InputMode::RenamePane
             | InputMode::Prompt
-            | InputMode::Tmux => Vec::new(),
+            | InputMode::Tmux
+            | InputMode::TabJump => Vec::new(),
         }
     }
 }

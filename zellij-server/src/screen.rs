@@ -57,7 +57,7 @@ use crate::{
 use zellij_utils::{
     data::{Event, InputMode, ModeInfo, Palette, PaletteColor, PluginCapabilities, Style, TabInfo},
     errors::{ContextType, ScreenContext},
-    input::get_mode_info,
+    input::{get_mode_info, tab_jump::assign_tab_hints},
     ipc::{ClientAttributes, PixelDimensions, ServerToClientMsg},
 };
 
@@ -266,6 +266,7 @@ pub enum ScreenInstruction {
     ),
     ToggleTab(ClientId, Option<NotificationEnd>),
     UpdateTabName(Vec<u8>, ClientId, Option<NotificationEnd>),
+    TabJumpInput(Vec<u8>, ClientId, Option<NotificationEnd>),
     UndoRenameTab(ClientId, Option<NotificationEnd>),
     MoveTabLeft(ClientId, Option<NotificationEnd>),
     MoveTabRight(ClientId, Option<NotificationEnd>),
@@ -596,6 +597,7 @@ impl From<&ScreenInstruction> for ScreenContext {
             ScreenInstruction::GoToTab(..) => ScreenContext::GoToTab,
             ScreenInstruction::GoToTabName(..) => ScreenContext::GoToTabName,
             ScreenInstruction::UpdateTabName(..) => ScreenContext::UpdateTabName,
+            ScreenInstruction::TabJumpInput(..) => ScreenContext::TabJumpInput,
             ScreenInstruction::UndoRenameTab(..) => ScreenContext::UndoRenameTab,
             ScreenInstruction::MoveTabLeft(..) => ScreenContext::MoveTabLeft,
             ScreenInstruction::MoveTabRight(..) => ScreenContext::MoveTabRight,
@@ -4968,6 +4970,53 @@ pub(crate) fn screen_thread_main(
                                 // waiting for it
             ) => {
                 screen.update_active_tab_name(c, client_id)?;
+                screen.render(None)?;
+            },
+            ScreenInstruction::TabJumpInput(
+                input,
+                client_id,
+                _completion_tx, // the action ends here, dropping this will release anything
+                                // waiting for it
+            ) => {
+                // Decode input: take first printable ASCII byte, lowercase it
+                let pressed = input
+                    .iter()
+                    .find(|&&b| b.is_ascii_graphic())
+                    .map(|&b| (b as char).to_ascii_lowercase());
+
+                if let Some(pressed_char) = pressed {
+                    // Collect tab names in position order
+                    let mut tabs_by_position: Vec<(usize, String)> = screen
+                        .tabs
+                        .values()
+                        .map(|t| (t.position, t.name.clone()))
+                        .collect();
+                    tabs_by_position.sort_by_key(|(pos, _)| *pos);
+
+                    let tab_names_refs: Vec<&str> =
+                        tabs_by_position.iter().map(|(_, n)| n.as_str()).collect();
+                    let hints = assign_tab_hints(&tab_names_refs);
+
+                    // Find which tab position (1-indexed for go_to_tab) matches
+                    let matched_position = hints
+                        .iter()
+                        .zip(tabs_by_position.iter())
+                        .find(|(hint, _)| **hint == Some(pressed_char))
+                        .map(|(_, (pos, _))| *pos + 1); // go_to_tab is 1-indexed
+
+                    if let Some(tab_index) = matched_position {
+                        screen.go_to_tab(tab_index, client_id)?;
+                    }
+                }
+
+                // Always switch back to Normal
+                let mut normal_mode_info = screen
+                    .mode_info
+                    .get(&client_id)
+                    .cloned()
+                    .unwrap_or_else(|| screen.default_mode_info.clone());
+                normal_mode_info.mode = InputMode::Normal;
+                screen.change_mode(normal_mode_info, client_id)?;
                 screen.render(None)?;
             },
             ScreenInstruction::UndoRenameTab(

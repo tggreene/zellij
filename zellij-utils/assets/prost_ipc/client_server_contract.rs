@@ -321,6 +321,8 @@ pub mod action {
         OverrideLayout(super::OverrideLayoutAction),
         #[prost(message, tag="97")]
         ListPanes(super::ListPanesAction),
+        #[prost(message, tag="98")]
+        TabJumpInput(super::TabJumpInputAction),
     }
 }
 // Action message definitions (all 92 variants)
@@ -746,6 +748,12 @@ pub struct GoToTabNameAction {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TabNameInputAction {
+    #[prost(uint32, repeated, tag="1")]
+    pub input: ::prost::alloc::vec::Vec<u32>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct TabJumpInputAction {
     #[prost(uint32, repeated, tag="1")]
     pub input: ::prost::alloc::vec::Vec<u32>,
 }
@@ -1837,6 +1845,7 @@ pub enum InputMode {
     Move = 12,
     Prompt = 13,
     Tmux = 14,
+    TabJump = 15,
 }
 impl InputMode {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -1860,6 +1869,7 @@ impl InputMode {
             InputMode::Move => "INPUT_MODE_MOVE",
             InputMode::Prompt => "INPUT_MODE_PROMPT",
             InputMode::Tmux => "INPUT_MODE_TMUX",
+            InputMode::TabJump => "INPUT_MODE_TAB_JUMP",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -1880,6 +1890,7 @@ impl InputMode {
             "INPUT_MODE_MOVE" => Some(Self::Move),
             "INPUT_MODE_PROMPT" => Some(Self::Prompt),
             "INPUT_MODE_TMUX" => Some(Self::Tmux),
+            "INPUT_MODE_TAB_JUMP" => Some(Self::TabJump),
             _ => None,
         }
     }

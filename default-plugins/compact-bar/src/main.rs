@@ -373,6 +373,7 @@ impl State {
                 | InputMode::RenamePane
                 | InputMode::Prompt
                 | InputMode::Tmux
+                | InputMode::TabJump
         )
     }
 

@@ -224,6 +224,7 @@ message Action {
     NewTabPayload new_tab_payload = 51;
     NewInPlacePanePayload new_in_place_pane_payload = 52;
     OverrideLayoutPayload override_layout_payload = 53;
+    bytes tab_jump_input_payload = 54;
   }
 }
 
@@ -441,6 +442,7 @@ enum ActionName {
     NewBlockingPane = 91;
     NewInPlacePane = 92;
     OverrideLayout = 93;
+    TabJumpInput = 94;
 }
 
 message Position {

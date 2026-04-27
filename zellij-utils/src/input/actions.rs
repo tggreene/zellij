@@ -291,6 +291,9 @@ pub enum Action {
     TabNameInput {
         input: Vec<u8>,
     },
+    TabJumpInput {
+        input: Vec<u8>,
+    },
     UndoRenameTab,
     MoveTab {
         direction: Direction,

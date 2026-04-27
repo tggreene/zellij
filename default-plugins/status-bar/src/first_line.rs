@@ -589,7 +589,9 @@ fn get_key_shortcut_for_mode<'a>(
     mode: &InputMode,
 ) -> Option<&'a mut KeyShortcut> {
     let key_action = match mode {
-        InputMode::Normal | InputMode::Prompt | InputMode::Tmux => return None,
+        InputMode::Normal | InputMode::Prompt | InputMode::Tmux | InputMode::TabJump => {
+            return None
+        },
         InputMode::Locked => KeyAction::Lock,
         InputMode::Pane | InputMode::RenamePane => KeyAction::Pane,
         InputMode::Tab | InputMode::RenameTab => KeyAction::Tab,

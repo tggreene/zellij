@@ -37,4 +37,6 @@ enum InputMode {
     Prompt = 12;
     /// `Tmux` mode allows for basic tmux keybindings functionality
     Tmux = 13;
+    /// `TabJump` mode allows jumping to a tab by pressing a hint character (easymotion-style)
+    TabJump = 14;
 }

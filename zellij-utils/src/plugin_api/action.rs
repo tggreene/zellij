@@ -534,6 +534,12 @@ impl TryFrom<ProtobufAction> for Action {
                 },
                 _ => Err("Wrong payload for Action::TabNameInput"),
             },
+            Some(ProtobufActionName::TabJumpInput) => match protobuf_action.optional_payload {
+                Some(OptionalPayload::TabJumpInputPayload(bytes)) => {
+                    Ok(Action::TabJumpInput { input: bytes })
+                },
+                _ => Err("Wrong payload for Action::TabJumpInput"),
+            },
             Some(ProtobufActionName::UndoRenameTab) => match protobuf_action.optional_payload {
                 Some(_) => Err("UndoRenameTab should not have a payload"),
                 None => Ok(Action::UndoRenameTab),
@@ -1442,6 +1448,10 @@ impl TryFrom<Action> for ProtobufAction {
             Action::TabNameInput { input: bytes } => Ok(ProtobufAction {
                 name: ProtobufActionName::TabNameInput as i32,
                 optional_payload: Some(OptionalPayload::TabNameInputPayload(bytes)),
+            }),
+            Action::TabJumpInput { input: bytes } => Ok(ProtobufAction {
+                name: ProtobufActionName::TabJumpInput as i32,
+                optional_payload: Some(OptionalPayload::TabJumpInputPayload(bytes)),
             }),
             Action::UndoRenameTab => Ok(ProtobufAction {
                 name: ProtobufActionName::UndoRenameTab as i32,

@@ -732,7 +732,8 @@ impl From<crate::input::actions::Action>
             ScrollToTopAction, ScrollUpAction, ScrollUpAtAction, SearchAction, SearchInputAction,
             SearchToggleOptionAction, SkipConfirmAction, StackPanesAction,
             StartOrReloadPluginAction, SwitchFocusAction, SwitchModeForAllClientsAction,
-            SwitchSessionAction, SwitchToModeAction, TabNameInputAction, ToggleActiveSyncTabAction,
+            SwitchSessionAction, SwitchToModeAction, TabJumpInputAction, TabNameInputAction,
+            ToggleActiveSyncTabAction,
             ToggleFloatingPanesAction, ToggleFocusFullscreenAction, ToggleGroupMarkingAction,
             ToggleMouseModeAction, TogglePaneEmbedOrFloatingAction, TogglePaneFramesAction,
             TogglePaneInGroupAction, TogglePanePinnedAction, ToggleTabAction, UndoRenamePaneAction,
@@ -1000,6 +1001,11 @@ impl From<crate::input::actions::Action>
             crate::input::actions::Action::ToggleTab => ActionType::ToggleTab(ToggleTabAction {}),
             crate::input::actions::Action::TabNameInput { input } => {
                 ActionType::TabNameInput(TabNameInputAction {
+                    input: input.into_iter().map(|b| b as u32).collect(),
+                })
+            },
+            crate::input::actions::Action::TabJumpInput { input } => {
+                ActionType::TabJumpInput(TabJumpInputAction {
                     input: input.into_iter().map(|b| b as u32).collect(),
                 })
             },
@@ -1609,6 +1615,11 @@ impl TryFrom<crate::client_server_contract::client_server_contract::Action>
                     input: tab_name_action.input.into_iter().map(|b| b as u8).collect(),
                 })
             },
+            ActionType::TabJumpInput(tab_jump_action) => {
+                Ok(crate::input::actions::Action::TabJumpInput {
+                    input: tab_jump_action.input.into_iter().map(|b| b as u8).collect(),
+                })
+            },
             ActionType::UndoRenameTab(_) => Ok(crate::input::actions::Action::UndoRenameTab),
             ActionType::MoveTab(move_tab_action) => Ok(crate::input::actions::Action::MoveTab {
                 direction: proto_i32_to_direction(move_tab_action.direction)?,
@@ -2133,6 +2144,7 @@ fn input_mode_to_proto_i32(mode: InputMode) -> i32 {
         InputMode::Move => ProtoInputMode::Move as i32,
         InputMode::Prompt => ProtoInputMode::Prompt as i32,
         InputMode::Tmux => ProtoInputMode::Tmux as i32,
+        InputMode::TabJump => ProtoInputMode::TabJump as i32,
     }
 }
 
@@ -2152,6 +2164,7 @@ fn proto_i32_to_input_mode(i: i32) -> Result<InputMode> {
         Some(ProtoInputMode::Move) => Ok(InputMode::Move),
         Some(ProtoInputMode::Prompt) => Ok(InputMode::Prompt),
         Some(ProtoInputMode::Tmux) => Ok(InputMode::Tmux),
+        Some(ProtoInputMode::TabJump) => Ok(InputMode::TabJump),
         _ => Err(anyhow!("Invalid InputMode value: {}", i)),
     }
 }
