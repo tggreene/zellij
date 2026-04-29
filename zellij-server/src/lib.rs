@@ -1400,8 +1400,7 @@ pub fn start_server(mut os_input: Box<dyn ServerOsApi>, socket_path: PathBuf) {
             ServerInstruction::Log(
                 lines_to_log,
                 client_id,
-                _completion_tx, // the action ends here, dropping this will release anything waiting
-                                // for it
+                mut completion_tx, // dropped at end of block to release the route-thread waiter
             ) => {
                 send_to_client!(
                     client_id,
@@ -1411,12 +1410,18 @@ pub fn start_server(mut os_input: Box<dyn ServerOsApi>, socket_path: PathBuf) {
                     },
                     session_state
                 );
+                // We just queued the Log for the client; tell the route
+                // thread to skip the trailing UnblockInputThread that
+                // would otherwise race the queued output and cause CLI
+                // clients to exit before consuming it.
+                if let Some(ne) = completion_tx.as_mut() {
+                    ne.set_output_sent(true);
+                }
             },
             ServerInstruction::LogError(
                 lines_to_log,
                 client_id,
-                _completion_tx, // the action ends here, dropping this will release anything waiting
-                                // for it
+                mut completion_tx,
             ) => {
                 send_to_client!(
                     client_id,
@@ -1426,6 +1431,9 @@ pub fn start_server(mut os_input: Box<dyn ServerOsApi>, socket_path: PathBuf) {
                     },
                     session_state
                 );
+                if let Some(ne) = completion_tx.as_mut() {
+                    ne.set_output_sent(true);
+                }
             },
             ServerInstruction::SwitchSession(mut connect_to_session, client_id, completion_tx) => {
                 let current_session_name = envs::get_session_name();

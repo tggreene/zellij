@@ -43,6 +43,12 @@ const ACTION_COMPLETION_TIMEOUT: Duration = Duration::from_secs(1);
 pub struct ActionCompletionResult {
     pub exit_status: Option<i32>,
     pub affected_pane_id: Option<PaneId>,
+    /// True when the action handler already sent its result directly to
+    /// the client (e.g. via ServerToClientMsg::Log). The route thread
+    /// uses this to suppress the trailing UnblockInputThread that would
+    /// otherwise race the queued output and cause CLI clients to exit
+    /// before consuming the Log message.
+    pub output_sent: bool,
 }
 
 fn wait_for_action_completion(
@@ -60,6 +66,7 @@ fn wait_for_action_completion(
                     ActionCompletionResult {
                         exit_status: None,
                         affected_pane_id: None,
+                        output_sent: false,
                     }
                 },
             }
@@ -78,6 +85,7 @@ fn wait_for_action_completion(
                 ActionCompletionResult {
                     exit_status: None,
                     affected_pane_id: None,
+                    output_sent: false,
                 }
             },
         }
@@ -96,6 +104,10 @@ pub struct NotificationEnd {
     exit_status: Option<i32>,
     unblock_condition: Option<UnblockCondition>,
     affected_pane_id: Option<PaneId>, // optional payload of the pane id affected by this action
+    /// Set to true when the action handler has already pushed its
+    /// result to the client (e.g. via Log/LogError). The route thread
+    /// reads this and suppresses the trailing UnblockInputThread.
+    output_sent: bool,
 }
 
 impl Clone for NotificationEnd {
@@ -106,6 +118,7 @@ impl Clone for NotificationEnd {
             exit_status: self.exit_status,
             unblock_condition: self.unblock_condition,
             affected_pane_id: self.affected_pane_id,
+            output_sent: self.output_sent,
         }
     }
 }
@@ -117,6 +130,7 @@ impl NotificationEnd {
             exit_status: None,
             unblock_condition: None,
             affected_pane_id: None,
+            output_sent: false,
         }
     }
 
@@ -129,7 +143,15 @@ impl NotificationEnd {
             exit_status: None,
             unblock_condition: Some(unblock_condition),
             affected_pane_id: None,
+            output_sent: false,
         }
+    }
+
+    /// Mark that the action handler has already delivered its output to
+    /// the client. The route thread uses this to skip the redundant
+    /// UnblockInputThread that would otherwise race the actual output.
+    pub fn set_output_sent(&mut self, sent: bool) {
+        self.output_sent = sent;
     }
 
     pub fn set_exit_status(&mut self, exit_status: i32) {
@@ -151,6 +173,7 @@ impl Drop for NotificationEnd {
             let result = ActionCompletionResult {
                 exit_status: self.exit_status,
                 affected_pane_id: self.affected_pane_id,
+                output_sent: self.output_sent,
             };
             let _ = tx.send(result);
         }
@@ -1630,8 +1653,10 @@ pub(crate) fn route_thread_main(
                                               mut retry_queue: Option<
                     &mut VecDeque<ClientToServerMsg>,
                 >|
-                 -> Result<bool> {
+                 -> Result<(bool, bool)> {
+                    // returns (should_break, output_sent_to_client)
                     let mut should_break = false;
+                    let mut output_sent = false;
                     let senders = session_data
                         .read()
                         .to_anyhow()
@@ -1679,7 +1704,7 @@ pub(crate) fn route_thread_main(
                             },
                         }
                         // don't do anything else for watchers
-                        return Ok(should_break);
+                        return Ok((should_break, output_sent));
                     }
 
                     match instruction {
@@ -1833,7 +1858,7 @@ pub(crate) fn route_thread_main(
                                 client_keybinds,
                             )) = session_data_assets
                             {
-                                if route_action(
+                                let (act_break, act_result) = route_action(
                                     action,
                                     client_id,
                                     Some(cli_client_id),
@@ -1847,10 +1872,14 @@ pub(crate) fn route_thread_main(
                                     client_keybinds,
                                     client_input_mode,
                                     Some(os_input.clone()),
-                                )?
-                                .0
-                                {
+                                )?;
+                                if act_break {
                                     should_break = true;
+                                }
+                                if let Some(r) = act_result {
+                                    if r.output_sent {
+                                        output_sent = true;
+                                    }
                                 }
                             }
                         },
@@ -2026,7 +2055,7 @@ pub(crate) fn route_thread_main(
                         },
                         ClientToServerMsg::ClientExited => {
                             let _ = to_server.send(ServerInstruction::RemoveClient(client_id));
-                            return Ok(true);
+                            return Ok((true, output_sent));
                         },
                         ClientToServerMsg::KillSession => {
                             to_server
@@ -2050,23 +2079,34 @@ pub(crate) fn route_thread_main(
                                 to_server.send(ServerInstruction::FailedToStartWebServer(error));
                         },
                     }
-                    Ok(should_break)
+                    Ok((should_break, output_sent))
                 };
+                let mut output_sent_overall = false;
                 let mut repeat_retries = VecDeque::new();
                 while let Some(instruction_to_retry) = retry_queue.pop_front() {
                     log::warn!("Server ready, retrying sending instruction.");
                     thread::sleep(Duration::from_millis(5));
-                    let should_break =
+                    let (should_break, output_sent) =
                         handle_instruction(instruction_to_retry, Some(&mut repeat_retries))?;
+                    output_sent_overall |= output_sent;
                     if should_break {
                         break 'route_loop;
                     }
                 }
                 // retry on loop around
                 retry_queue.append(&mut repeat_retries);
-                let should_break = handle_instruction(instruction, Some(&mut retry_queue))?;
+                let (should_break, output_sent) =
+                    handle_instruction(instruction, Some(&mut retry_queue))?;
+                output_sent_overall |= output_sent;
                 if should_break {
                     break 'route_loop;
+                }
+                // If the action handler already pushed its result to the
+                // client (Log/LogError), skip the trailing UnblockInputThread
+                // — racing it against the queued output causes CLI clients
+                // to break out of their recv loop on the wrong message.
+                if output_sent_overall {
+                    continue;
                 }
             },
             None => {
