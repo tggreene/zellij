@@ -233,6 +233,7 @@ message Action {
     NewBlockingPaneAction new_blocking_pane = 93;
     OverrideLayoutAction override_layout = 94;
     ListPanesAction list_panes = 97;
+    WriteCharsToPaneIdAction write_chars_to_pane_id = 98;
   }
 }
 
@@ -307,6 +308,11 @@ message WriteAction {
 
 message WriteCharsAction {
   string chars = 1;
+}
+
+message WriteCharsToPaneIdAction {
+  PaneId pane_id = 1;
+  string chars = 2;
 }
 
 message SwitchToModeAction {

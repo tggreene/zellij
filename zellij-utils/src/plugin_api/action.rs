@@ -1837,6 +1837,10 @@ impl TryFrom<Action> for ProtobufAction {
             | Action::Copy
             | Action::DumpLayout
             | Action::ListPanes
+            | Action::WriteCharsToPaneId {
+                pane_id: _,
+                chars: _,
+            }
             | Action::CliPipe { .. }
             | Action::ListClients
             | Action::EjectClient { client_id: _ }

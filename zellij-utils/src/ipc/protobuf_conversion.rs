@@ -737,7 +737,7 @@ impl From<crate::input::actions::Action>
             ToggleFloatingPanesAction, ToggleFocusFullscreenAction, ToggleGroupMarkingAction,
             ToggleMouseModeAction, TogglePaneEmbedOrFloatingAction, TogglePaneFramesAction,
             TogglePaneInGroupAction, TogglePanePinnedAction, ToggleTabAction, UndoRenamePaneAction,
-            UndoRenameTabAction, WriteAction, WriteCharsAction,
+            UndoRenameTabAction, WriteAction, WriteCharsAction, WriteCharsToPaneIdAction,
         };
         use std::collections::HashMap;
 
@@ -754,6 +754,12 @@ impl From<crate::input::actions::Action>
             }),
             crate::input::actions::Action::WriteChars { chars } => {
                 ActionType::WriteChars(WriteCharsAction { chars })
+            },
+            crate::input::actions::Action::WriteCharsToPaneId { pane_id, chars } => {
+                ActionType::WriteCharsToPaneId(WriteCharsToPaneIdAction {
+                    pane_id: Some(pane_id.into()),
+                    chars,
+                })
             },
             crate::input::actions::Action::SwitchToMode { input_mode } => {
                 ActionType::SwitchToMode(SwitchToModeAction {
@@ -1349,6 +1355,15 @@ impl TryFrom<crate::client_server_contract::client_server_contract::Action>
             ActionType::WriteChars(write_chars_action) => {
                 Ok(crate::input::actions::Action::WriteChars {
                     chars: write_chars_action.chars,
+                })
+            },
+            ActionType::WriteCharsToPaneId(write_chars_to_pane_id_action) => {
+                Ok(crate::input::actions::Action::WriteCharsToPaneId {
+                    pane_id: write_chars_to_pane_id_action
+                        .pane_id
+                        .ok_or_else(|| anyhow!("WriteCharsToPaneId missing pane_id"))?
+                        .try_into()?,
+                    chars: write_chars_to_pane_id_action.chars,
                 })
             },
             ActionType::SwitchToMode(switch_mode_action) => {
