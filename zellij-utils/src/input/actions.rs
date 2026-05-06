@@ -555,7 +555,7 @@ impl Action {
                 file_path: path.as_os_str().to_string_lossy().into(),
                 include_scrollback: full,
             }]),
-            CliAction::DumpLayout => Ok(vec![Action::DumpLayout]),
+            CliAction::DumpLayout { .. } => Ok(vec![Action::DumpLayout]),
             CliAction::EditScrollback => Ok(vec![Action::EditScrollback]),
             CliAction::ScrollUp => Ok(vec![Action::ScrollUp]),
             CliAction::ScrollDown => Ok(vec![Action::ScrollDown]),

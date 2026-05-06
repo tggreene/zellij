@@ -23,6 +23,38 @@ fn main() {
     {
         let config = Config::try_from(&opts).ok();
         if let Some(Command::Sessions(Sessions::Action(cli_action))) = opts.command {
+            // dump-layout --cached short-circuits the IPC roundtrip and
+            // reads session-layout.kdl directly. The server writes that
+            // file on a tight cadence (see background_jobs::LIVE_LAYOUT_EXPORT_INTERVAL),
+            // so this is what tooling that polls dump-layout regularly should
+            // use unless they need real-time freshness.
+            if let CliAction::DumpLayout { cached: true } = &cli_action {
+                let session_name = opts
+                    .session
+                    .clone()
+                    .or_else(|| envs::get_session_name().ok())
+                    .unwrap_or_else(|| {
+                        eprintln!(
+                            "dump-layout --cached needs a session name; pass -s <name> or run from inside a session"
+                        );
+                        std::process::exit(1);
+                    });
+                let path = zellij_utils::consts::session_layout_cache_file_name(&session_name);
+                match std::fs::read_to_string(&path) {
+                    Ok(contents) => {
+                        print!("{}", contents);
+                        std::process::exit(0);
+                    },
+                    Err(e) => {
+                        eprintln!(
+                            "dump-layout --cached: {} (path: {})",
+                            e,
+                            path.display()
+                        );
+                        std::process::exit(1);
+                    },
+                }
+            }
             commands::send_action_to_session(cli_action, opts.session, config);
             std::process::exit(0);
         }

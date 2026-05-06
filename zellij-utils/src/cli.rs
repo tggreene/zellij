@@ -642,7 +642,14 @@ pub enum CliAction {
         full: bool,
     },
     /// Dump current layout to stdout
-    DumpLayout,
+    DumpLayout {
+        /// Read from the periodically-persisted session layout cache file
+        /// instead of round-tripping through the running server. Faster
+        /// for tooling that polls dump-layout regularly. Stale by up to
+        /// ~3s vs realtime.
+        #[clap(long, value_parser, default_value("false"), takes_value(false))]
+        cached: bool,
+    },
     /// Open the pane scrollback in your default editor
     EditScrollback,
     /// Scroll up in the focused pane
