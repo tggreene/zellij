@@ -427,6 +427,11 @@ pub enum ScreenInstruction {
         Option<NotificationEnd>, // completion signal
     ),
     SerializeLayoutForResurrection,
+    /// Same as SerializeLayoutForResurrection but bypasses the
+    /// session_serialization config gate. Used by the live-layout export
+    /// path so the on-disk session-layout.kdl reflects current state
+    /// independently of the user's resurrection setting.
+    ForceSerializeLayout,
     RenameSession(String, ClientId, Option<NotificationEnd>), // String -> new name
     ListClientsMetadata(Option<PathBuf>, ClientId, Option<NotificationEnd>), // Option<PathBuf> - default shell
     ListPanes(ClientId, Option<NotificationEnd>),
@@ -679,6 +684,9 @@ impl From<&ScreenInstruction> for ScreenContext {
             ScreenInstruction::ReplacePane(..) => ScreenContext::ReplacePane,
             ScreenInstruction::NewInPlacePluginPane(..) => ScreenContext::NewInPlacePluginPane,
             ScreenInstruction::SerializeLayoutForResurrection => {
+                ScreenContext::SerializeLayoutForResurrection
+            },
+            ScreenInstruction::ForceSerializeLayout => {
                 ScreenContext::SerializeLayoutForResurrection
             },
             ScreenInstruction::RenameSession(..) => ScreenContext::RenameSession,
@@ -6016,6 +6024,9 @@ pub(crate) fn screen_thread_main(
                 if screen.session_serialization {
                     screen.dump_layout_to_hd()?;
                 }
+            },
+            ScreenInstruction::ForceSerializeLayout => {
+                screen.dump_layout_to_hd()?;
             },
             ScreenInstruction::RenameSession(
                 name,

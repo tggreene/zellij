@@ -95,6 +95,13 @@ static FLASH_DURATION_MS: u64 = 400; // Doherty threshold
 static PLUGIN_ANIMATION_OFFSET_DURATION_MD: u64 = 500;
 static SESSION_READ_DURATION: u64 = 1000;
 static DEFAULT_SERIALIZATION_INTERVAL: u64 = 60000;
+/// How often to refresh the on-disk session-layout.kdl regardless of the
+/// user's session_serialization config. External tools (claude-sessions,
+/// zellij-cwd, kaze) used to poll `zellij action dump-layout` for current
+/// pane state — that round-trips through the screen thread on every poll
+/// and contends with user input. Writing the layout to disk on a tight
+/// cadence inverts that: zellij does the work once, scripts read the file.
+static LIVE_LAYOUT_EXPORT_INTERVAL: u64 = 2000;
 static REPAINT_DELAY_MS: u64 = 10;
 
 pub(crate) fn background_jobs_main(
@@ -112,6 +119,7 @@ pub(crate) fn background_jobs_main(
         Arc::new(Mutex::new(BTreeMap::new()));
     let current_session_layout = Arc::new(Mutex::new((String::new(), BTreeMap::new())));
     let last_serialization_time = Arc::new(Mutex::new(Instant::now()));
+    let last_live_layout_export = Arc::new(Mutex::new(Instant::now()));
     let serialization_interval = serialization_interval.map(|s| s * 1000); // convert to
                                                                            // milliseconds
     let last_render_request: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
@@ -199,6 +207,7 @@ pub(crate) fn background_jobs_main(
                     let current_session_layout = current_session_layout.clone();
                     let current_session_plugin_list = current_session_plugin_list.clone();
                     let last_serialization_time = last_serialization_time.clone();
+                    let last_live_layout_export = last_live_layout_export.clone();
                     async move {
                         loop {
                             let current_session_name =
@@ -243,6 +252,25 @@ pub(crate) fn background_jobs_main(
                                     ScreenInstruction::SerializeLayoutForResurrection,
                                 );
                                 *last_serialization_time.lock().unwrap() = Instant::now();
+                            }
+                            // Live layout export — runs on its own (much
+                            // tighter) cadence and bypasses session_serialization
+                            // entirely. ForceSerializeLayout writes the same
+                            // session-layout.kdl that SerializeLayoutForResurrection
+                            // would, but unconditionally; external pollers can
+                            // tail this file instead of round-tripping through
+                            // `zellij action dump-layout`.
+                            if last_live_layout_export
+                                .lock()
+                                .unwrap()
+                                .elapsed()
+                                .as_millis()
+                                >= LIVE_LAYOUT_EXPORT_INTERVAL.into()
+                            {
+                                let _ = senders.send_to_screen(
+                                    ScreenInstruction::ForceSerializeLayout,
+                                );
+                                *last_live_layout_export.lock().unwrap() = Instant::now();
                             }
                             task::sleep(std::time::Duration::from_millis(SESSION_READ_DURATION))
                                 .await;
