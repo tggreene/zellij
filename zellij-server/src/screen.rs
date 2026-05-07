@@ -3439,6 +3439,7 @@ impl Screen {
                             None
                         },
                         focused_clients,
+                        p.recovery_command(),
                     )
                 })
                 .collect();
@@ -3477,6 +3478,7 @@ impl Screen {
                             None
                         },
                         focused_clients,
+                        p.recovery_command(),
                     )
                 })
                 .collect();

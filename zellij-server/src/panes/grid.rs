@@ -346,6 +346,12 @@ pub struct Grid {
     pub selection: Selection,
     pub title: Option<String>,
     pub secondary_title: Option<String>,
+    /// Recovery command set by the running program via OSC 7779 — what to
+    /// re-run if this pane is resurrected from a saved layout. Lets tools
+    /// declare their own recovery shape (eg. `c masumi` for a claude slot,
+    /// `mman attach foo` for a managed process) instead of zellij guessing
+    /// from ps-derived command lines.
+    pub recovery_command: Option<String>,
     pub is_scrolled: bool,
     pub link_handler: Rc<RefCell<LinkHandler>>,
     pub ring_bell: bool,
@@ -532,6 +538,7 @@ impl Grid {
             title_stack: vec![],
             title: None,
             secondary_title: None,
+            recovery_command: None,
             changed_colors: None,
             is_scrolled: false,
             link_handler,
@@ -2616,6 +2623,27 @@ impl Perform for Grid {
                         self.secondary_title = None;
                     } else {
                         self.secondary_title = Some(title);
+                    }
+                }
+            },
+
+            // Set recovery command (custom OSC 7779).
+            // \e]7779;<shell command>\a  — emitted by tools that want a
+            // specific re-launch shape (eg. `c masumi`) on resurrection.
+            // Empty payload clears.
+            b"7779" => {
+                if params.len() >= 2 {
+                    let cmd = params[1..]
+                        .iter()
+                        .flat_map(|x| str::from_utf8(x))
+                        .collect::<Vec<&str>>()
+                        .join(";")
+                        .trim()
+                        .to_owned();
+                    if cmd.is_empty() {
+                        self.recovery_command = None;
+                    } else {
+                        self.recovery_command = Some(cmd);
                     }
                 }
             },

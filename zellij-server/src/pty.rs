@@ -830,6 +830,36 @@ pub(crate) fn pty_thread_main(mut pty: Pty, layout: Box<Layout>) -> Result<()> {
     Ok(())
 }
 
+/// If `recovery_command` is set, replace the run instruction with a fresh
+/// `sh -c <cmd>` invocation, preserving the original cwd if there was one.
+/// Tools opt into this by emitting OSC 7779; lets them declare a clean
+/// re-launch shape (eg. `c masumi`) instead of zellij guessing from
+/// ps-derived/mangled argv on resurrection.
+fn override_run_with_recovery(
+    run: Option<Run>,
+    recovery_command: Option<String>,
+) -> Option<Run> {
+    match recovery_command {
+        Some(cmd) if !cmd.is_empty() => {
+            let cwd = match &run {
+                Some(Run::Command(rc)) => rc.cwd.clone(),
+                Some(Run::Cwd(cwd)) => Some(cwd.clone()),
+                _ => None,
+            };
+            Some(Run::Command(RunCommand {
+                command: PathBuf::from("sh"),
+                args: vec!["-c".to_string(), cmd],
+                cwd,
+                hold_on_close: false,
+                hold_on_start: false,
+                originating_plugin: None,
+                use_terminal_title: false,
+            }))
+        },
+        _ => run,
+    }
+}
+
 impl Pty {
     pub fn new(
         bus: Bus<PtyInstruction>,
@@ -1114,10 +1144,11 @@ impl Pty {
 
         let extracted_run_instructions = layout.extract_run_instructions();
         let extracted_preferred_ids = layout.extract_preferred_terminal_ids();
-        let extracted_floating_run_instructions: Vec<(Option<Run>, Option<u32>)> = floating_panes_layout
+        let extracted_recovery_commands = layout.extract_recovery_commands();
+        let extracted_floating_run_instructions: Vec<(Option<Run>, Option<u32>, Option<String>)> = floating_panes_layout
             .iter()
             .filter(|f| !f.already_running)
-            .map(|f| (f.run.clone(), f.preferred_terminal_id))
+            .map(|f| (f.run.clone(), f.preferred_terminal_id, f.recovery_command.clone()))
             .collect();
         let mut new_pane_pids: Vec<(u32, bool, Option<RunCommand>, Result<RawFd>)> = vec![]; // (terminal_id,
                                                                                              // starts_held,
@@ -1135,9 +1166,11 @@ impl Pty {
             // Hot reload: tell os_input what terminal_id this slot wants
             // before spawning. Single-shot — consumed by next spawn_terminal.
             let preferred_id = extracted_preferred_ids.get(idx).copied().flatten();
+            let recovery_command = extracted_recovery_commands.get(idx).cloned().flatten();
             if let Some(os_input) = self.bus.os_input.as_ref() {
                 os_input.set_next_preferred_terminal_id(preferred_id);
             }
+            let run_instruction = override_run_with_recovery(run_instruction, recovery_command);
             let originating_plugin = run_instruction.as_ref().and_then(|r| {
                 if let Run::Command(run_command) = r {
                     run_command.originating_plugin.clone()
@@ -1157,10 +1190,11 @@ impl Pty {
                 originating_plugins_to_inform.push((terminal_id, originating_plugin));
             }
         }
-        for (run_instruction, preferred_id) in extracted_floating_run_instructions {
+        for (run_instruction, preferred_id, recovery_command) in extracted_floating_run_instructions {
             if let Some(os_input) = self.bus.os_input.as_ref() {
                 os_input.set_next_preferred_terminal_id(preferred_id);
             }
+            let run_instruction = override_run_with_recovery(run_instruction, recovery_command);
             let originating_plugin = run_instruction.as_ref().and_then(|r| {
                 if let Run::Command(run_command) = r {
                     run_command.originating_plugin.clone()
@@ -1319,10 +1353,11 @@ impl Pty {
 
         let extracted_run_instructions = layout.extract_run_instructions();
         let extracted_preferred_ids = layout.extract_preferred_terminal_ids();
-        let extracted_floating_run_instructions: Vec<(Option<Run>, Option<u32>)> = floating_panes_layout
+        let extracted_recovery_commands = layout.extract_recovery_commands();
+        let extracted_floating_run_instructions: Vec<(Option<Run>, Option<u32>, Option<String>)> = floating_panes_layout
             .iter()
             .filter(|f| !f.already_running)
-            .map(|f| (f.run.clone(), f.preferred_terminal_id))
+            .map(|f| (f.run.clone(), f.preferred_terminal_id, f.recovery_command.clone()))
             .collect();
         let mut new_pane_pids: Vec<(u32, bool, Option<RunCommand>, Result<RawFd>)> = vec![]; // (terminal_id,
                                                                                              // starts_held,
@@ -1340,9 +1375,11 @@ impl Pty {
             // Hot reload: tell os_input what terminal_id this slot wants
             // before spawning. Single-shot — consumed by next spawn_terminal.
             let preferred_id = extracted_preferred_ids.get(idx).copied().flatten();
+            let recovery_command = extracted_recovery_commands.get(idx).cloned().flatten();
             if let Some(os_input) = self.bus.os_input.as_ref() {
                 os_input.set_next_preferred_terminal_id(preferred_id);
             }
+            let run_instruction = override_run_with_recovery(run_instruction, recovery_command);
             let originating_plugin = run_instruction.as_ref().and_then(|r| {
                 if let Run::Command(run_command) = r {
                     run_command.originating_plugin.clone()
@@ -1362,10 +1399,11 @@ impl Pty {
                 originating_plugins_to_inform.push((terminal_id, originating_plugin));
             }
         }
-        for (run_instruction, preferred_id) in extracted_floating_run_instructions {
+        for (run_instruction, preferred_id, recovery_command) in extracted_floating_run_instructions {
             if let Some(os_input) = self.bus.os_input.as_ref() {
                 os_input.set_next_preferred_terminal_id(preferred_id);
             }
+            let run_instruction = override_run_with_recovery(run_instruction, recovery_command);
             let originating_plugin = run_instruction.as_ref().and_then(|r| {
                 if let Run::Command(run_command) = r {
                     run_command.originating_plugin.clone()

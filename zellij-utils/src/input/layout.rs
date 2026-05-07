@@ -755,6 +755,8 @@ pub struct FloatingPaneLayout {
     pub logical_position: Option<usize>,
     /// See TiledPaneLayout::preferred_terminal_id.
     pub preferred_terminal_id: Option<u32>,
+    /// See TiledPaneLayout::recovery_command.
+    pub recovery_command: Option<String>,
 }
 
 impl FloatingPaneLayout {
@@ -772,6 +774,7 @@ impl FloatingPaneLayout {
             pane_initial_contents: None,
             logical_position: None,
             preferred_terminal_id: None,
+            recovery_command: None,
         }
     }
     pub fn add_cwd_to_layout(&mut self, cwd: &PathBuf) {
@@ -821,6 +824,12 @@ pub struct TiledPaneLayout {
     /// round-trip terminal_id through the layout file so PTY masters
     /// stored in the fd-daemon match their original panes after restart.
     pub preferred_terminal_id: Option<u32>,
+    /// Override command for resurrection. Captured from OSC 7779 emitted
+    /// by the running tool (eg. `c masumi`, `mman attach foo`). When
+    /// present, takes precedence over the captured command/args — the
+    /// resurrected pane runs the recovery_command via shell instead of
+    /// replaying possibly-mangled argv from ps.
+    pub recovery_command: Option<String>,
 }
 
 impl TiledPaneLayout {
@@ -973,6 +982,25 @@ impl TiledPaneLayout {
         // diverge after ignore-stripping, callers should fall back to no
         // preferred id rather than mismatching.
         ids
+    }
+    /// Mirrors `extract_run_instructions` but returns `recovery_command`
+    /// for each pane in the same order. Caller zips with run instructions
+    /// to override the spawn command at resurrection time.
+    pub fn extract_recovery_commands(&self) -> Vec<Option<String>> {
+        let mut cmds = vec![];
+        if self.children.is_empty() {
+            cmds.push(self.recovery_command.clone());
+        }
+        let mut cmds_of_children = vec![];
+        for child in &self.children {
+            let mut child_cmds = child.extract_recovery_commands();
+            if !child_cmds.is_empty() {
+                cmds.push(child_cmds.remove(0));
+            }
+            cmds_of_children.append(&mut child_cmds);
+        }
+        cmds.append(&mut cmds_of_children);
+        cmds
     }
     pub fn extract_run_instructions(&self) -> Vec<Option<Run>> {
         // the order of these run instructions is significant and needs to be the same

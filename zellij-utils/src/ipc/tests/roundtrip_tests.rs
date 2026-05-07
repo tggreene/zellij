@@ -1950,6 +1950,7 @@ fn test_client_messages() {
                     pane_initial_contents: Some("pane_initial_contents".to_owned()),
                     logical_position: Some(15),
                     preferred_terminal_id: None,
+                    recovery_command: None,
                 },
                 FloatingPaneLayout {
                     name: Some("third floating layout".to_owned()),

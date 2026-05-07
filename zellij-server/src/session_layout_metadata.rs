@@ -463,6 +463,7 @@ impl Into<PaneLayoutManifest> for PaneLayoutMetadata {
             is_focused: self.is_focused,
             pane_contents: self.pane_contents,
             preferred_terminal_id,
+            recovery_command: self.recovery_command,
         }
     }
 }
@@ -487,6 +488,7 @@ pub struct PaneLayoutMetadata {
     pub(crate) is_focused: bool,
     pub(crate) pane_contents: Option<String>,
     pub(crate) focused_clients: Vec<ClientId>,
+    pub(crate) recovery_command: Option<String>,
 }
 
 impl PaneLayoutMetadata {
@@ -499,6 +501,7 @@ impl PaneLayoutMetadata {
         is_focused: bool,
         pane_contents: Option<String>,
         focused_clients: Vec<ClientId>,
+        recovery_command: Option<String>,
     ) -> Self {
         PaneLayoutMetadata {
             id,
@@ -510,6 +513,7 @@ impl PaneLayoutMetadata {
             is_focused,
             pane_contents,
             focused_clients,
+            recovery_command,
         }
     }
 }

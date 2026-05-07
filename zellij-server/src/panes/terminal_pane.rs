@@ -810,6 +810,9 @@ impl Pane for TerminalPane {
             Some(self.pane_name.clone())
         }
     }
+    fn recovery_command(&self) -> Option<String> {
+        self.grid.recovery_command.clone()
+    }
     fn exit_status(&self) -> Option<i32> {
         self.is_held
             .as_ref()

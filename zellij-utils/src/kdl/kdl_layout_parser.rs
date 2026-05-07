@@ -110,6 +110,9 @@ impl<'a> KdlLayoutParser<'a> {
             // can claim the same id and the fd-daemon's keyed lookup still
             // matches the right master fd
             || property_name == "id"
+            // tool-declared recovery shell command (OSC 7779) — overrides
+            // command/args at resurrection time
+            || property_name == "recovery_command"
     }
     fn is_a_valid_floating_pane_property(&self, property_name: &str) -> bool {
         property_name == "borderless"
@@ -129,6 +132,7 @@ impl<'a> KdlLayoutParser<'a> {
             || property_name == "pinned"
             || property_name == "contents_file"
             || property_name == "id"
+            || property_name == "recovery_command"
     }
     fn is_a_valid_tab_property(&self, property_name: &str) -> bool {
         property_name == "focus"
@@ -579,6 +583,9 @@ impl<'a> KdlLayoutParser<'a> {
         });
         let preferred_terminal_id =
             kdl_get_int_property_or_child_value!(kdl_node, "id").map(|n| n as u32);
+        let recovery_command =
+            kdl_get_string_property_or_child_value!(kdl_node, "recovery_command")
+                .map(|s| s.to_string());
         Ok(TiledPaneLayout {
             borderless: borderless.unwrap_or_default(),
             focus,
@@ -593,6 +600,7 @@ impl<'a> KdlLayoutParser<'a> {
             is_expanded_in_stack,
             pane_initial_contents,
             preferred_terminal_id,
+            recovery_command,
             ..Default::default()
         })
     }
@@ -623,6 +631,9 @@ impl<'a> KdlLayoutParser<'a> {
         });
         let preferred_terminal_id =
             kdl_get_int_property_or_child_value!(kdl_node, "id").map(|n| n as u32);
+        let recovery_command =
+            kdl_get_string_property_or_child_value!(kdl_node, "recovery_command")
+                .map(|s| s.to_string());
         Ok(FloatingPaneLayout {
             name,
             height,
@@ -634,6 +645,7 @@ impl<'a> KdlLayoutParser<'a> {
             pinned,
             pane_initial_contents,
             preferred_terminal_id,
+            recovery_command,
             ..Default::default()
         })
     }

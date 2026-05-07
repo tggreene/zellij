@@ -587,6 +587,12 @@ pub trait Pane {
     fn progress_animation_offset(&mut self) {} // only relevant for plugins
     fn current_title(&self) -> String;
     fn custom_title(&self) -> Option<String>;
+    /// Tool-declared recovery command (OSC 7779). Default None; terminal
+    /// panes pull it off their grid. Used by layout serialization to
+    /// declare a re-launch command independent of ps-derived argv.
+    fn recovery_command(&self) -> Option<String> {
+        None
+    }
     fn is_held(&self) -> bool {
         false
     }

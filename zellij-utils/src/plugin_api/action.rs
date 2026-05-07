@@ -2797,6 +2797,7 @@ impl TryFrom<ProtobufTiledPaneLayout> for TiledPaneLayout {
             hide_floating_panes: protobuf.hide_floating_panes,
             pane_initial_contents: protobuf.pane_initial_contents,
             preferred_terminal_id: None, // not serialized over plugin protobuf
+            recovery_command: None,      // not serialized over plugin protobuf
         })
     }
 }
@@ -2853,6 +2854,7 @@ impl TryFrom<ProtobufFloatingPaneLayout> for FloatingPaneLayout {
             pane_initial_contents: protobuf.pane_initial_contents,
             logical_position: protobuf.logical_position.map(|p| p as usize),
             preferred_terminal_id: None,
+            recovery_command: None,
         })
     }
 }

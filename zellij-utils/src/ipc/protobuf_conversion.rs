@@ -3174,6 +3174,7 @@ impl TryFrom<crate::client_server_contract::client_server_contract::TiledPaneLay
             hide_floating_panes: layout.hide_floating_panes,
             pane_initial_contents: layout.pane_initial_contents,
             preferred_terminal_id: None, // hot-reload-only, not over IPC
+            recovery_command: None,      // hot-reload-only, not over IPC
         })
     }
 }
@@ -3206,6 +3207,7 @@ impl TryFrom<crate::client_server_contract::client_server_contract::FloatingPane
             pane_initial_contents: layout.pane_initial_contents,
             logical_position: layout.logical_position.map(|p| p as usize),
             preferred_terminal_id: None,
+            recovery_command: None,
         })
     }
 }
