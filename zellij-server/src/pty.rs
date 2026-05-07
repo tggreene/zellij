@@ -831,10 +831,12 @@ pub(crate) fn pty_thread_main(mut pty: Pty, layout: Box<Layout>) -> Result<()> {
 }
 
 /// If `recovery_command` is set, replace the run instruction with a fresh
-/// `sh -c <cmd>` invocation, preserving the original cwd if there was one.
-/// Tools opt into this by emitting OSC 7779; lets them declare a clean
-/// re-launch shape (eg. `c masumi`) instead of zellij guessing from
-/// ps-derived/mangled argv on resurrection.
+/// `sh -c <cmd>; exec $SHELL` invocation, preserving the original cwd if
+/// there was one. Tools opt into this by emitting OSC 7779; lets them
+/// declare a clean re-launch shape (eg. `c masumi`) instead of zellij
+/// guessing from ps-derived/mangled argv on resurrection. The trailing
+/// `exec $SHELL` keeps the pane alive when the recovery command exits,
+/// so the user lands in their normal shell rather than a dead pane.
 fn override_run_with_recovery(
     run: Option<Run>,
     recovery_command: Option<String>,
@@ -846,9 +848,10 @@ fn override_run_with_recovery(
                 Some(Run::Cwd(cwd)) => Some(cwd.clone()),
                 _ => None,
             };
+            let wrapped = format!("{}; exec ${{SHELL:-/bin/sh}}", cmd);
             Some(Run::Command(RunCommand {
                 command: PathBuf::from("sh"),
-                args: vec!["-c".to_string(), cmd],
+                args: vec!["-c".to_string(), wrapped],
                 cwd,
                 hold_on_close: false,
                 hold_on_start: false,
