@@ -236,6 +236,7 @@ message Action {
     WriteCharsToPaneIdAction write_chars_to_pane_id = 98;
     HotReloadAction hot_reload = 99;
     TabJumpInputAction tab_jump_input = 100;
+    WriteToPaneIdAction write_to_pane_id = 101;
   }
 }
 
@@ -316,6 +317,11 @@ message WriteCharsAction {
 message WriteCharsToPaneIdAction {
   PaneId pane_id = 1;
   string chars = 2;
+}
+
+message WriteToPaneIdAction {
+  PaneId pane_id = 1;
+  bytes bytes = 2;
 }
 
 message SwitchToModeAction {

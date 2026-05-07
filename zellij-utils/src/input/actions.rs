@@ -132,6 +132,11 @@ pub enum Action {
         pane_id: PaneId,
         chars: String,
     },
+    /// Write bytes to a specific pane by id without focusing it.
+    WriteToPaneId {
+        pane_id: PaneId,
+        bytes: Vec<u8>,
+    },
     /// Switch to the specified input mode.
     SwitchToMode {
         input_mode: InputMode,
@@ -520,6 +525,11 @@ impl Action {
                 let pane_id =
                     PaneId::from_str(&pane_id).map_err(|e| format!("Invalid pane ID: {}", e))?;
                 Ok(vec![Action::WriteCharsToPaneId { pane_id, chars }])
+            },
+            CliAction::WriteToPane { pane_id, bytes } => {
+                let pane_id =
+                    PaneId::from_str(&pane_id).map_err(|e| format!("Invalid pane ID: {}", e))?;
+                Ok(vec![Action::WriteToPaneId { pane_id, bytes }])
             },
             CliAction::Resize { resize, direction } => {
                 Ok(vec![Action::Resize { resize, direction }])

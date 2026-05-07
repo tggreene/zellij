@@ -276,6 +276,17 @@ pub(crate) fn route_action(
                 output_sent: false,
             });
         },
+        Action::WriteToPaneId { pane_id, bytes } => {
+            let pane_id: PaneId = pane_id.into();
+            senders
+                .send_to_screen(ScreenInstruction::WriteToPaneId(bytes, pane_id))
+                .with_context(err_context)?;
+            let _ = completion_tx.send(ActionCompletionResult {
+                exit_status: None,
+                affected_pane_id: Some(pane_id),
+                output_sent: false,
+            });
+        },
         Action::SwitchToMode { input_mode } => {
             let attrs = &client_attributes;
             senders

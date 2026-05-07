@@ -1841,6 +1841,10 @@ impl TryFrom<Action> for ProtobufAction {
                 pane_id: _,
                 chars: _,
             }
+            | Action::WriteToPaneId {
+                pane_id: _,
+                bytes: _,
+            }
             | Action::CliPipe { .. }
             | Action::ListClients
             | Action::EjectClient { client_id: _ }

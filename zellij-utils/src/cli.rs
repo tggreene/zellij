@@ -599,6 +599,12 @@ pub enum CliAction {
         pane_id: String,
         chars: String,
     },
+    /// Write bytes to a pane by its ID without changing focus
+    /// (eg. terminal_1, plugin_2, or bare integer like 1).
+    WriteToPane {
+        pane_id: String,
+        bytes: Vec<u8>,
+    },
     /// [increase|decrease] the focused panes area at the [left|down|up|right] border.
     Resize {
         resize: Resize,

@@ -738,6 +738,7 @@ impl From<crate::input::actions::Action>
             ToggleMouseModeAction, TogglePaneEmbedOrFloatingAction, TogglePaneFramesAction,
             TogglePaneInGroupAction, TogglePanePinnedAction, ToggleTabAction, UndoRenamePaneAction,
             UndoRenameTabAction, WriteAction, WriteCharsAction, WriteCharsToPaneIdAction,
+            WriteToPaneIdAction,
         };
         use std::collections::HashMap;
 
@@ -759,6 +760,12 @@ impl From<crate::input::actions::Action>
                 ActionType::WriteCharsToPaneId(WriteCharsToPaneIdAction {
                     pane_id: Some(pane_id.into()),
                     chars,
+                })
+            },
+            crate::input::actions::Action::WriteToPaneId { pane_id, bytes } => {
+                ActionType::WriteToPaneId(WriteToPaneIdAction {
+                    pane_id: Some(pane_id.into()),
+                    bytes,
                 })
             },
             crate::input::actions::Action::SwitchToMode { input_mode } => {
@@ -1367,6 +1374,15 @@ impl TryFrom<crate::client_server_contract::client_server_contract::Action>
                         .ok_or_else(|| anyhow!("WriteCharsToPaneId missing pane_id"))?
                         .try_into()?,
                     chars: write_chars_to_pane_id_action.chars,
+                })
+            },
+            ActionType::WriteToPaneId(write_to_pane_id_action) => {
+                Ok(crate::input::actions::Action::WriteToPaneId {
+                    pane_id: write_to_pane_id_action
+                        .pane_id
+                        .ok_or_else(|| anyhow!("WriteToPaneId missing pane_id"))?
+                        .try_into()?,
+                    bytes: write_to_pane_id_action.bytes,
                 })
             },
             ActionType::SwitchToMode(switch_mode_action) => {
