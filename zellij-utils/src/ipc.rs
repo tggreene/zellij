@@ -185,6 +185,7 @@ pub enum ExitReason {
     WebClientsForbidden,
     CustomExitStatus(i32),
     Error(String),
+    HotReload,
 }
 
 impl Display for ExitReason {
@@ -230,6 +231,7 @@ There are a few things you can try now:
             },
             Self::CustomExitStatus(exit_status) => write!(f, "Exit {}", exit_status),
             Self::Error(e) => write!(f, "Error occurred in server:\n{}", e),
+            Self::HotReload => write!(f, "Hot reloading..."),
         }
     }
 }

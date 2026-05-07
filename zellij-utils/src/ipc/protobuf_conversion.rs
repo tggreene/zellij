@@ -717,7 +717,7 @@ impl From<crate::input::actions::Action>
             DumpScreenAction, EditFileAction, EditScrollbackAction, FocusNextPaneAction,
             FocusPluginPaneWithIdAction, FocusPreviousPaneAction, FocusTerminalPaneWithIdAction,
             GoToNextTabAction, GoToPreviousTabAction, GoToTabAction, GoToTabNameAction,
-            HalfPageScrollDownAction, HalfPageScrollUpAction, KeybindPipeAction,
+            HalfPageScrollDownAction, HalfPageScrollUpAction, HotReloadAction, KeybindPipeAction,
             LaunchOrFocusPluginAction, LaunchPluginAction, ListClientsAction, ListPanesAction, EjectClientAction,
             EjectAllOtherClientsAction, MouseEventAction,
             MoveFocusAction, MoveFocusOrTabAction, MovePaneAction, MovePaneBackwardsAction,
@@ -1320,6 +1320,9 @@ impl From<crate::input::actions::Action>
             },
             crate::input::actions::Action::ToggleGroupMarking => {
                 ActionType::ToggleGroupMarking(ToggleGroupMarkingAction {})
+            },
+            crate::input::actions::Action::HotReload => {
+                ActionType::HotReload(HotReloadAction {})
             },
         };
 
@@ -1929,6 +1932,7 @@ impl TryFrom<crate::client_server_contract::client_server_contract::Action>
             },
             ActionType::ListClients(_) => Ok(crate::input::actions::Action::ListClients),
             ActionType::ListPanes(_) => Ok(crate::input::actions::Action::ListPanes),
+            ActionType::HotReload(_) => Ok(crate::input::actions::Action::HotReload),
             ActionType::EjectClient(eject_client_action) => {
                 Ok(crate::input::actions::Action::EjectClient {
                     client_id: eject_client_action.client_id as u16,
@@ -2121,6 +2125,7 @@ impl From<ExitReason> for ProtoExitReason {
             ExitReason::WebClientsForbidden => ProtoExitReason::WebClientsForbidden,
             ExitReason::Error(_msg) => ProtoExitReason::Error,
             ExitReason::CustomExitStatus(_status) => ProtoExitReason::CustomExitStatus,
+            ExitReason::HotReload => ProtoExitReason::HotReload,
         }
     }
 }
@@ -2137,6 +2142,7 @@ impl TryFrom<ProtoExitReason> for ExitReason {
             ProtoExitReason::WebClientsForbidden => Ok(ExitReason::WebClientsForbidden),
             ProtoExitReason::Error => Ok(ExitReason::Error("Protobuf error".to_string())),
             ProtoExitReason::CustomExitStatus => Ok(ExitReason::CustomExitStatus(0)),
+            ProtoExitReason::HotReload => Ok(ExitReason::HotReload),
             ProtoExitReason::Unspecified => Err(anyhow!("Unspecified exit reason")),
         }
     }
@@ -3167,6 +3173,7 @@ impl TryFrom<crate::client_server_contract::client_server_contract::TiledPaneLay
             run_instructions_to_ignore: vec![], // not represented in protobuf
             hide_floating_panes: layout.hide_floating_panes,
             pane_initial_contents: layout.pane_initial_contents,
+            preferred_terminal_id: None, // hot-reload-only, not over IPC
         })
     }
 }
@@ -3198,6 +3205,7 @@ impl TryFrom<crate::client_server_contract::client_server_contract::FloatingPane
             already_running: layout.already_running,
             pane_initial_contents: layout.pane_initial_contents,
             logical_position: layout.logical_position.map(|p| p as usize),
+            preferred_terminal_id: None,
         })
     }
 }

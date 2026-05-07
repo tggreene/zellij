@@ -74,6 +74,48 @@ fn set_terminal_size_using_fd(
     };
 }
 
+/// Force the slave's foreground process group to redraw by twiddling the
+/// PTY winsize twice (each visible-to-kernel size delta produces a SIGWINCH
+/// on the slave's foreground process group; shells handle SIGWINCH by
+/// redrawing the prompt). Used by hot reload — idle shells whose prompt
+/// was lost with the old terminal grid would otherwise sit blank.
+fn nudge_winsize_for_redraw(fd: RawFd, terminal_id: u32) {
+    use libc::{ioctl, TIOCGWINSZ, TIOCSWINSZ};
+
+    let mut current = Winsize {
+        ws_col: 0,
+        ws_row: 0,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    #[allow(clippy::useless_conversion)]
+    let read_ok = unsafe { ioctl(fd, TIOCGWINSZ.into(), &mut current) } == 0;
+    if !read_ok || current.ws_col < 2 {
+        log::warn!(
+            "Hot reload: winsize nudge skipped for terminal_id {} (TIOCGWINSZ failed or col<2)",
+            terminal_id
+        );
+        return;
+    }
+    let temp = Winsize {
+        ws_col: current.ws_col - 1,
+        ..current
+    };
+    #[allow(clippy::useless_conversion)]
+    unsafe {
+        ioctl(fd, TIOCSWINSZ.into(), &temp);
+        // brief gap so the shell handles the first SIGWINCH before we send
+        // the second one — back-to-back identical-direction signals can be
+        // coalesced by the kernel
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        ioctl(fd, TIOCSWINSZ.into(), &current);
+    };
+    log::info!(
+        "Hot reload: nudged terminal_id {} for prompt redraw ({}x{})",
+        terminal_id, current.ws_col, current.ws_row
+    );
+}
+
 /// Handle some signals for the child process. This will loop until the child
 /// process exits.
 fn handle_command_exit(mut child: Child) -> Result<Option<i32>> {
@@ -437,6 +479,11 @@ pub struct ServerOsInputOutput {
     // a command pane with a
     // non-existing command)
     cached_resizes: Arc<Mutex<Option<BTreeMap<u32, (u16, u16, Option<u16>, Option<u16>)>>>>, // <terminal_id, (cols, rows, width_in_pixels, height_in_pixels)>
+    /// Single-shot override for the next spawn_terminal's terminal_id.
+    /// Set by the layout-applier when re-spawning a pane that came in with
+    /// a `preferred_terminal_id` from a hot-reload-saved layout. Consumed
+    /// (taken) by spawn_terminal on the next call.
+    next_preferred_terminal_id: Arc<Mutex<Option<u32>>>,
 }
 
 // async fn in traits is not supported by rust, so dtolnay's excellent async_trait macro is being
@@ -537,6 +584,16 @@ pub trait ServerOsApi: Send + Sync {
     fn clear_terminal_id(&self, terminal_id: u32) -> Result<()>;
     fn cache_resizes(&mut self) {}
     fn apply_cached_resizes(&mut self) {}
+    /// Get a snapshot of the terminal_id -> raw fd mapping for hot reload
+    fn get_terminal_id_to_raw_fd(&self) -> BTreeMap<u32, Option<RawFd>> {
+        BTreeMap::new()
+    }
+    /// Restore terminal_id -> raw fd mapping from a hot reload state
+    fn restore_terminal_id_to_raw_fd(&self, _map: BTreeMap<u32, Option<RawFd>>) {}
+    /// Set the terminal_id the *next* call to spawn_terminal should claim.
+    /// Used by the layout applier when resurrecting a pane that came with a
+    /// preferred id (hot reload). Single-shot — consumed by the next spawn.
+    fn set_next_preferred_terminal_id(&self, _id: Option<u32>) {}
 }
 
 impl ServerOsApi for ServerOsInputOutput {
@@ -593,19 +650,74 @@ impl ServerOsApi for ServerOsInputOutput {
             .lock()
             .to_anyhow()
             .with_context(err_context)?;
-        let terminal_id = self
-            .terminal_id_to_raw_fd
+        // Honor a single-shot caller-supplied id (hot reload resurrection)
+        // before falling back to auto-allocation. Taken so subsequent spawns
+        // go back to default behavior.
+        let preferred_id = self
+            .next_preferred_terminal_id
             .lock()
-            .to_anyhow()
-            .with_context(err_context)?
-            .keys()
-            .copied()
-            .collect::<BTreeSet<u32>>()
-            .last()
-            .map(|l| l + 1)
-            .or(Some(0));
+            .ok()
+            .and_then(|mut g| g.take());
+        let terminal_id = if let Some(id) = preferred_id {
+            Some(id)
+        } else {
+            self.terminal_id_to_raw_fd
+                .lock()
+                .to_anyhow()
+                .with_context(err_context)?
+                .keys()
+                .copied()
+                .collect::<BTreeSet<u32>>()
+                .last()
+                .map(|l| l + 1)
+                .or(Some(0))
+        };
         match terminal_id {
             Some(terminal_id) => {
+                // Check if we have a stored hot-reload fd for THIS terminal_id.
+                // If we don't, fall through to spawning a fresh shell — that's
+                // better than a dead pane.
+                if let Some(reused_fd) = crate::hot_reload::pop_hot_reload_fd(terminal_id) {
+                    match nix::sys::stat::fstat(reused_fd) {
+                        Ok(_) => {
+                            log::info!(
+                                "Hot reload: reusing fd {} for terminal_id {}",
+                                reused_fd, terminal_id
+                            );
+                            self.terminal_id_to_raw_fd
+                                .lock()
+                                .to_anyhow()
+                                .with_context(err_context)?
+                                .insert(terminal_id, Some(reused_fd));
+                            // The shell already drew its prompt, but those
+                            // bytes are gone with the old terminal grid.
+                            // Nudge the winsize after a beat (lets the layout
+                            // applier set the real size first) so the slave's
+                            // shell gets SIGWINCH and repaints, then push a
+                            // CR as a fallback in case SIGWINCH didn't land.
+                            std::thread::Builder::new()
+                                .name(format!("hr_winsize_nudge_{}", terminal_id))
+                                .spawn(move || {
+                                    std::thread::sleep(
+                                        std::time::Duration::from_millis(400),
+                                    );
+                                    nudge_winsize_for_redraw(reused_fd, terminal_id);
+                                })
+                                .ok();
+                            // pid_primary = master fd; child_fd = 0 (child already running)
+                            return Ok((terminal_id, reused_fd, 0));
+                        },
+                        Err(e) => {
+                            log::error!(
+                                "Hot reload: stored fd {} for terminal_id {} is dead ({}) — \
+                                 falling back to fresh spawn",
+                                reused_fd, terminal_id, e
+                            );
+                            let _ = nix::unistd::close(reused_fd);
+                        },
+                    }
+                }
+
                 self.terminal_id_to_raw_fd
                     .lock()
                     .to_anyhow()
@@ -634,17 +746,25 @@ impl ServerOsApi for ServerOsInputOutput {
     fn reserve_terminal_id(&self) -> Result<u32> {
         let err_context = || "failed to reserve a terminal ID".to_string();
 
-        let terminal_id = self
-            .terminal_id_to_raw_fd
+        let preferred_id = self
+            .next_preferred_terminal_id
             .lock()
-            .to_anyhow()
-            .with_context(err_context)?
-            .keys()
-            .copied()
-            .collect::<BTreeSet<u32>>()
-            .last()
-            .map(|l| l + 1)
-            .or(Some(0));
+            .ok()
+            .and_then(|mut g| g.take());
+        let terminal_id = if let Some(id) = preferred_id {
+            Some(id)
+        } else {
+            self.terminal_id_to_raw_fd
+                .lock()
+                .to_anyhow()
+                .with_context(err_context)?
+                .keys()
+                .copied()
+                .collect::<BTreeSet<u32>>()
+                .last()
+                .map(|l| l + 1)
+                .or(Some(0))
+        };
         match terminal_id {
             Some(terminal_id) => {
                 self.terminal_id_to_raw_fd
@@ -883,11 +1003,37 @@ impl ServerOsApi for ServerOsInputOutput {
             .with_context(|| format!("failed to rerun command in terminal id {}", terminal_id))
     }
     fn clear_terminal_id(&self, terminal_id: u32) -> Result<()> {
-        self.terminal_id_to_raw_fd
+        let removed = self
+            .terminal_id_to_raw_fd
             .lock()
             .to_anyhow()
             .with_context(|| format!("failed to clear terminal ID {}", terminal_id))?
             .remove(&terminal_id);
+        if let Some(Some(fd)) = removed {
+            // Get the slave's foreground process group via the master fd,
+            // and SIGHUP it directly. For normal panes this is redundant
+            // (close_pane already sent SIGHUP via kill(child_pid)). For
+            // hot-reloaded panes we don't have the child_pid, so this is
+            // how the shell finds out the user closed its pane. tcgetpgrp
+            // returns an error if the slave is already gone — fine,
+            // there's nobody to signal in that case.
+            if let Ok(pgid) = nix::unistd::tcgetpgrp(fd) {
+                let _ = nix::sys::signal::killpg(pgid, nix::sys::signal::Signal::SIGHUP);
+            }
+
+            // Close the master in a detached thread. close() on a PTY
+            // master inherited via SCM_RIGHTS can wedge indefinitely in
+            // macOS's ttydestroy path; we hit this in production once and
+            // it took the whole pty thread (hence the entire session)
+            // down with it. Doing the close off-thread means even if the
+            // kernel never returns, the pty thread keeps serving.
+            std::thread::Builder::new()
+                .name(format!("pty_master_close_{}", terminal_id))
+                .spawn(move || {
+                    let _ = nix::unistd::close(fd);
+                })
+                .ok();
+        }
         Ok(())
     }
     fn cache_resizes(&mut self) {
@@ -911,6 +1057,18 @@ impl ServerOsApi for ServerOsInputOutput {
             }
         }
     }
+    fn get_terminal_id_to_raw_fd(&self) -> BTreeMap<u32, Option<RawFd>> {
+        self.terminal_id_to_raw_fd
+            .lock()
+            .unwrap()
+            .clone()
+    }
+    fn restore_terminal_id_to_raw_fd(&self, map: BTreeMap<u32, Option<RawFd>>) {
+        *self.terminal_id_to_raw_fd.lock().unwrap() = map;
+    }
+    fn set_next_preferred_terminal_id(&self, id: Option<u32>) {
+        *self.next_preferred_terminal_id.lock().unwrap() = id;
+    }
 }
 
 impl Clone for Box<dyn ServerOsApi> {
@@ -930,6 +1088,7 @@ pub fn get_server_os_input() -> Result<ServerOsInputOutput, nix::Error> {
         client_senders: Arc::new(Mutex::new(HashMap::new())),
         terminal_id_to_raw_fd: Arc::new(Mutex::new(BTreeMap::new())),
         cached_resizes: Arc::new(Mutex::new(None)),
+        next_preferred_terminal_id: Arc::new(Mutex::new(None)),
     })
 }
 

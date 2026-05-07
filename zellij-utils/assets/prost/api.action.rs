@@ -1018,6 +1018,7 @@ pub enum ActionName {
     NewInPlacePane = 92,
     OverrideLayout = 93,
     TabJumpInput = 94,
+    HotReload = 95,
 }
 impl ActionName {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -1118,6 +1119,7 @@ impl ActionName {
             ActionName::NewInPlacePane => "NewInPlacePane",
             ActionName::OverrideLayout => "OverrideLayout",
             ActionName::TabJumpInput => "TabJumpInput",
+            ActionName::HotReload => "HotReload",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -1215,6 +1217,7 @@ impl ActionName {
             "NewInPlacePane" => Some(Self::NewInPlacePane),
             "OverrideLayout" => Some(Self::OverrideLayout),
             "TabJumpInput" => Some(Self::TabJumpInput),
+            "HotReload" => Some(Self::HotReload),
             _ => None,
         }
     }

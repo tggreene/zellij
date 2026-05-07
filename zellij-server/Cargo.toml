@@ -47,6 +47,7 @@ url = { workspace = true }
 uuid = { workspace = true }
 vte = { workspace = true }
 wasmi_wasi = { version = "0.51.1" }
+zellij-fd-daemon = { path = "../zellij-fd-daemon" }
 zellij-utils = { workspace = true }
 tokio = { workspace = true }
 once_cell = "1.19"

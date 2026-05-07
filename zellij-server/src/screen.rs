@@ -429,8 +429,9 @@ pub enum ScreenInstruction {
     SerializeLayoutForResurrection,
     /// Same as SerializeLayoutForResurrection but bypasses the
     /// session_serialization config gate. Used by the live-layout export
-    /// path so the on-disk session-layout.kdl reflects current state
-    /// independently of the user's resurrection setting.
+    /// path AND hot reload — both want the on-disk session-layout.kdl
+    /// to reflect current state regardless of the user's resurrection
+    /// setting.
     ForceSerializeLayout,
     RenameSession(String, ClientId, Option<NotificationEnd>), // String -> new name
     ListClientsMetadata(Option<PathBuf>, ClientId, Option<NotificationEnd>), // Option<PathBuf> - default shell
@@ -3364,6 +3365,13 @@ impl Screen {
         Ok(())
     }
     fn get_layout_metadata(&self, default_shell: Option<PathBuf>) -> SessionLayoutMetadata {
+        self.get_layout_metadata_with_viewport(default_shell, self.serialize_pane_viewport)
+    }
+    fn get_layout_metadata_with_viewport(
+        &self,
+        default_shell: Option<PathBuf>,
+        force_serialize_viewport: bool,
+    ) -> SessionLayoutMetadata {
         let mut session_layout_metadata = SessionLayoutMetadata::new(self.default_layout.clone());
         if let Some(default_shell) = default_shell {
             session_layout_metadata.update_default_shell(default_shell);
@@ -3425,7 +3433,7 @@ impl Screen {
                         p.invoked_with().clone(),
                         p.custom_title(),
                         !focused_clients.is_empty(),
-                        if self.serialize_pane_viewport {
+                        if force_serialize_viewport {
                             p.serialize(self.scrollback_lines_to_serialize)
                         } else {
                             None
@@ -3463,7 +3471,7 @@ impl Screen {
                         p.invoked_with().clone(),
                         p.custom_title(),
                         !focused_clients.is_empty(),
-                        if self.serialize_pane_viewport {
+                        if force_serialize_viewport {
                             p.serialize(self.scrollback_lines_to_serialize)
                         } else {
                             None
@@ -6026,6 +6034,12 @@ pub(crate) fn screen_thread_main(
                 }
             },
             ScreenInstruction::ForceSerializeLayout => {
+                // dump_layout_to_hd respects serialize_pane_viewport from
+                // the user's config (default off). Hot reload defers to
+                // that — replaying scrollback into a freshly-sized grid
+                // scrambles wrapping/cursor positions, so default-off is
+                // the better behavior. Users who want the contents back
+                // can flip serialize_pane_viewport on in their config.
                 screen.dump_layout_to_hd()?;
             },
             ScreenInstruction::RenameSession(

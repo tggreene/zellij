@@ -93,12 +93,12 @@ pub(crate) fn stdin_loop(
                     // if we fail, we try to parse normally
                     match KittyKeyboardParser::new().parse(&buf) {
                         Some(key_with_modifier) => {
-                            send_input_instructions
+                            if send_input_instructions
                                 .send(InputInstruction::KeyWithModifierEvent(
                                     key_with_modifier,
                                     current_buffer.drain(..).collect(),
                                 ))
-                                .unwrap();
+                                .is_err() { break; }
                             continue;
                         },
                         None => {},
@@ -124,23 +124,23 @@ pub(crate) fn stdin_loop(
                             if poller.ready() {
                                 break;
                             }
-                            send_input_instructions
+                            if send_input_instructions
                                 .send(InputInstruction::KeyEvent(
                                     input_event.clone(),
                                     current_buffer.clone(),
                                 ))
-                                .unwrap();
+                                .is_err() { break; }
                         }
                     }
 
                     holding_mouse = is_mouse_press_or_hold(&input_event);
 
-                    send_input_instructions
+                    if send_input_instructions
                         .send(InputInstruction::KeyEvent(
                             input_event,
                             current_buffer.drain(..).collect(),
                         ))
-                        .unwrap();
+                        .is_err() { break; }
                 }
             },
             Err(e) => {

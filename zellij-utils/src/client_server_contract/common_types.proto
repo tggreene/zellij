@@ -234,6 +234,8 @@ message Action {
     OverrideLayoutAction override_layout = 94;
     ListPanesAction list_panes = 97;
     WriteCharsToPaneIdAction write_chars_to_pane_id = 98;
+    HotReloadAction hot_reload = 99;
+    TabJumpInputAction tab_jump_input = 100;
   }
 }
 
@@ -291,6 +293,7 @@ message BreakPaneRightAction {}
 message BreakPaneLeftAction {}
 message ListClientsAction {}
 message ListPanesAction {}
+message HotReloadAction {}
 message EjectClientAction {
   uint32 client_id = 1;
 }
@@ -432,6 +435,10 @@ message GoToTabNameAction {
 }
 
 message TabNameInputAction {
+  repeated uint32 input = 1;
+}
+
+message TabJumpInputAction {
   repeated uint32 input = 1;
 }
 
@@ -600,6 +607,7 @@ enum InputMode {
   INPUT_MODE_MOVE = 12;
   INPUT_MODE_PROMPT = 13;
   INPUT_MODE_TMUX = 14;
+  INPUT_MODE_TAB_JUMP = 15;
 }
 
 enum Direction {
@@ -697,6 +705,7 @@ enum ExitReason {
   EXIT_REASON_WEB_CLIENTS_FORBIDDEN = 6;
   EXIT_REASON_ERROR = 7;
   EXIT_REASON_CUSTOM_EXIT_STATUS = 8;
+  EXIT_REASON_HOT_RELOAD = 9;
 }
 
 // Additional supporting types for Action messages

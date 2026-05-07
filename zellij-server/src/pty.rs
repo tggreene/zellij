@@ -738,7 +738,21 @@ pub(crate) fn pty_thread_main(mut pty: Pty, layout: Box<Layout>) -> Result<()> {
             PtyInstruction::LogLayoutToHd(mut session_layout_metadata) => {
                 let err_context = || format!("Failed to dump layout");
                 pty.populate_session_layout_metadata(&mut session_layout_metadata);
-                if session_layout_metadata.is_dirty() {
+                // During hot reload we always want the layout serialized — the
+                // 'dirty' heuristic exists to avoid writing a layout that
+                // matches the default and adds no info, but post-hot-reload we
+                // need an exact snapshot regardless of how it compares to the
+                // default layout.
+                let force = crate::hot_reload::is_hot_reload_in_progress();
+                if force {
+                    // The PTY survives across hot reload via the fd daemon, so
+                    // we don't need (and don't want) Run::Command in the
+                    // serialized layout. The new server reuses the live PTY
+                    // regardless. Also: ps-derived command strings lose argv
+                    // quoting and produce malformed KDL when re-serialized.
+                    session_layout_metadata.strip_command_runs_from_terminal_panes();
+                }
+                if force || session_layout_metadata.is_dirty() {
                     match session_serialization::serialize_session_layout(
                         session_layout_metadata.into(),
                     ) {
@@ -949,7 +963,7 @@ impl Pty {
         let (hold_on_start, hold_on_close, originating_command_plugin, originating_edit_plugin) =
             match &terminal_action {
                 TerminalAction::RunCommand(run_command) => (
-                    run_command.hold_on_start,
+                    run_command.hold_on_start && !crate::hot_reload::has_hot_reload_fds(),
                     run_command.hold_on_close,
                     run_command.originating_plugin.clone(),
                     None,
@@ -1099,10 +1113,12 @@ impl Pty {
         }
 
         let extracted_run_instructions = layout.extract_run_instructions();
-        let extracted_floating_run_instructions = floating_panes_layout
+        let extracted_preferred_ids = layout.extract_preferred_terminal_ids();
+        let extracted_floating_run_instructions: Vec<(Option<Run>, Option<u32>)> = floating_panes_layout
             .iter()
             .filter(|f| !f.already_running)
-            .map(|f| f.run.clone());
+            .map(|f| (f.run.clone(), f.preferred_terminal_id))
+            .collect();
         let mut new_pane_pids: Vec<(u32, bool, Option<RunCommand>, Result<RawFd>)> = vec![]; // (terminal_id,
                                                                                              // starts_held,
                                                                                              // run_command,
@@ -1115,7 +1131,13 @@ impl Pty {
 
         let mut originating_plugins_to_inform = vec![];
 
-        for run_instruction in extracted_run_instructions {
+        for (idx, run_instruction) in extracted_run_instructions.into_iter().enumerate() {
+            // Hot reload: tell os_input what terminal_id this slot wants
+            // before spawning. Single-shot — consumed by next spawn_terminal.
+            let preferred_id = extracted_preferred_ids.get(idx).copied().flatten();
+            if let Some(os_input) = self.bus.os_input.as_ref() {
+                os_input.set_next_preferred_terminal_id(preferred_id);
+            }
             let originating_plugin = run_instruction.as_ref().and_then(|r| {
                 if let Run::Command(run_command) = r {
                     run_command.originating_plugin.clone()
@@ -1135,7 +1157,10 @@ impl Pty {
                 originating_plugins_to_inform.push((terminal_id, originating_plugin));
             }
         }
-        for run_instruction in extracted_floating_run_instructions {
+        for (run_instruction, preferred_id) in extracted_floating_run_instructions {
+            if let Some(os_input) = self.bus.os_input.as_ref() {
+                os_input.set_next_preferred_terminal_id(preferred_id);
+            }
             let originating_plugin = run_instruction.as_ref().and_then(|r| {
                 if let Run::Command(run_command) = r {
                     run_command.originating_plugin.clone()
@@ -1293,10 +1318,12 @@ impl Pty {
         self.fill_cwd(&mut default_shell, client_id);
 
         let extracted_run_instructions = layout.extract_run_instructions();
-        let extracted_floating_run_instructions = floating_panes_layout
+        let extracted_preferred_ids = layout.extract_preferred_terminal_ids();
+        let extracted_floating_run_instructions: Vec<(Option<Run>, Option<u32>)> = floating_panes_layout
             .iter()
             .filter(|f| !f.already_running)
-            .map(|f| f.run.clone());
+            .map(|f| (f.run.clone(), f.preferred_terminal_id))
+            .collect();
         let mut new_pane_pids: Vec<(u32, bool, Option<RunCommand>, Result<RawFd>)> = vec![]; // (terminal_id,
                                                                                              // starts_held,
                                                                                              // run_command,
@@ -1309,7 +1336,13 @@ impl Pty {
 
         let mut originating_plugins_to_inform = vec![];
 
-        for run_instruction in extracted_run_instructions {
+        for (idx, run_instruction) in extracted_run_instructions.into_iter().enumerate() {
+            // Hot reload: tell os_input what terminal_id this slot wants
+            // before spawning. Single-shot — consumed by next spawn_terminal.
+            let preferred_id = extracted_preferred_ids.get(idx).copied().flatten();
+            if let Some(os_input) = self.bus.os_input.as_ref() {
+                os_input.set_next_preferred_terminal_id(preferred_id);
+            }
             let originating_plugin = run_instruction.as_ref().and_then(|r| {
                 if let Run::Command(run_command) = r {
                     run_command.originating_plugin.clone()
@@ -1329,7 +1362,10 @@ impl Pty {
                 originating_plugins_to_inform.push((terminal_id, originating_plugin));
             }
         }
-        for run_instruction in extracted_floating_run_instructions {
+        for (run_instruction, preferred_id) in extracted_floating_run_instructions {
+            if let Some(os_input) = self.bus.os_input.as_ref() {
+                os_input.set_next_preferred_terminal_id(preferred_id);
+            }
             let originating_plugin = run_instruction.as_ref().and_then(|r| {
                 if let Run::Command(run_command) = r {
                     run_command.originating_plugin.clone()
@@ -1493,7 +1529,13 @@ impl Pty {
         });
         match run_instruction {
             Some(Run::Command(mut command)) => {
-                let starts_held = command.hold_on_start;
+                // During hot reload, override hold_on_start so we reuse
+                // the preserved fd instead of showing "rerun" prompt
+                let starts_held = if command.hold_on_start && crate::hot_reload::has_hot_reload_fds() {
+                    false
+                } else {
+                    command.hold_on_start
+                };
                 let hold_on_close = command.hold_on_close;
                 let quit_cb = Box::new({
                     let senders = self.bus.senders.clone();
@@ -1662,18 +1704,27 @@ impl Pty {
         match id {
             PaneId::Terminal(id) => {
                 self.task_handles.remove(&id);
-                if let Some(child_fd) = self.id_to_child_pid.remove(&id) {
-                    task::block_on(async {
-                        let err_context = || format!("failed to run async task for pane {id}");
-                        self.bus
-                            .os_input
-                            .as_mut()
-                            .with_context(err_context)
-                            .fatal()
-                            .kill(Pid::from_raw(child_fd))
-                            .with_context(err_context)
-                            .fatal();
-                    });
+                if let Some(child_pid) = self.id_to_child_pid.remove(&id) {
+                    // Hot-reloaded panes record child_pid=0 because the new
+                    // server inherits the live PTY but not the original shell
+                    // PID. kill(Pid::from_raw(0), SIGHUP) is POSIX-defined to
+                    // signal the ENTIRE process group — i.e. it would SIGHUP
+                    // the zellij-server itself. Skip the kill in that case
+                    // and rely on the master fd being closed below to send
+                    // SIGHUP to the shell via PTY hangup.
+                    if child_pid > 0 {
+                        task::block_on(async {
+                            let err_context = || format!("failed to run async task for pane {id}");
+                            self.bus
+                                .os_input
+                                .as_mut()
+                                .with_context(err_context)
+                                .fatal()
+                                .kill(Pid::from_raw(child_pid))
+                                .with_context(err_context)
+                                .fatal();
+                        });
+                    }
                 }
                 self.bus
                     .os_input
@@ -2049,6 +2100,10 @@ impl Pty {
 
 impl Drop for Pty {
     fn drop(&mut self) {
+        if crate::hot_reload::is_hot_reload_in_progress() {
+            log::info!("Hot reload: skipping child cleanup in Pty::drop (children should survive)");
+            return;
+        }
         let child_ids: Vec<u32> = self.id_to_child_pid.keys().copied().collect();
         for id in child_ids {
             self.close_pane(PaneId::Terminal(id))

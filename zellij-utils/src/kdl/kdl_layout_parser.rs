@@ -106,6 +106,10 @@ impl<'a> KdlLayoutParser<'a> {
             || property_name == "expanded"
             || property_name == "exclude_from_sync"
             || property_name == "contents_file"
+            // hot reload writes the original terminal_id so resurrection
+            // can claim the same id and the fd-daemon's keyed lookup still
+            // matches the right master fd
+            || property_name == "id"
     }
     fn is_a_valid_floating_pane_property(&self, property_name: &str) -> bool {
         property_name == "borderless"
@@ -124,6 +128,7 @@ impl<'a> KdlLayoutParser<'a> {
             || property_name == "height"
             || property_name == "pinned"
             || property_name == "contents_file"
+            || property_name == "id"
     }
     fn is_a_valid_tab_property(&self, property_name: &str) -> bool {
         property_name == "focus"
@@ -572,6 +577,8 @@ impl<'a> KdlLayoutParser<'a> {
                     std::fs::read_to_string(parent_folder.join(contents_file)).ok()
                 })
         });
+        let preferred_terminal_id =
+            kdl_get_int_property_or_child_value!(kdl_node, "id").map(|n| n as u32);
         Ok(TiledPaneLayout {
             borderless: borderless.unwrap_or_default(),
             focus,
@@ -585,6 +592,7 @@ impl<'a> KdlLayoutParser<'a> {
             children_are_stacked,
             is_expanded_in_stack,
             pane_initial_contents,
+            preferred_terminal_id,
             ..Default::default()
         })
     }
@@ -613,6 +621,8 @@ impl<'a> KdlLayoutParser<'a> {
                     std::fs::read_to_string(parent_folder.join(contents_file)).ok()
                 })
         });
+        let preferred_terminal_id =
+            kdl_get_int_property_or_child_value!(kdl_node, "id").map(|n| n as u32);
         Ok(FloatingPaneLayout {
             name,
             height,
@@ -623,6 +633,7 @@ impl<'a> KdlLayoutParser<'a> {
             focus,
             pinned,
             pane_initial_contents,
+            preferred_terminal_id,
             ..Default::default()
         })
     }

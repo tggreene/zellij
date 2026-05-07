@@ -10,7 +10,7 @@ use zellij_client::{
     old_config_converter::{
         config_yaml_to_config_kdl, convert_old_yaml_files, layout_yaml_to_layout_kdl,
     },
-    os_input_output::get_client_os_input,
+    os_input_output::{get_client_os_input, ClientOsApi},
     start_client as start_client_impl, ClientInfo,
 };
 
@@ -36,7 +36,10 @@ use zellij_utils::web_authentication_tokens::{
 };
 
 use miette::{Report, Result};
-use zellij_server::{os_input_output::get_server_os_input, start_server as start_server_impl};
+use zellij_server::{
+    os_input_output::get_server_os_input,
+    start_server as start_server_impl,
+};
 use zellij_utils::{
     cli::{CliArgs, Command, SessionCommand, Sessions},
     data::{ConnectToSession, LayoutInfo},
@@ -160,6 +163,7 @@ pub(crate) fn start_server(path: PathBuf, debug: bool) {
     let os_input = get_os_input(get_server_os_input);
     start_server_impl(Box::new(os_input), path);
 }
+
 
 #[cfg(feature = "web_server_capability")]
 pub(crate) fn start_web_server(
@@ -610,8 +614,13 @@ pub(crate) fn start_client(opts: CliArgs) {
     };
 
     let mut reconnect_to_session: Option<ConnectToSession> = None;
-    let os_input = get_os_input(get_client_os_input);
+    let mut os_input = get_os_input(get_client_os_input);
     loop {
+        // On reconnect (e.g. hot reload), create fresh IPC Arcs so old orphaned threads
+        // (signal, stdin) from the previous session can't interfere with the new connection.
+        if reconnect_to_session.is_some() {
+            os_input.reset_server_connection();
+        }
         let os_input = os_input.clone();
         let config = config.clone();
         let mut config_options = config_options.clone();

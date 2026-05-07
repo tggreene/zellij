@@ -411,6 +411,12 @@ pub(crate) fn route_action(
                 ))
                 .with_context(err_context)?;
         },
+        Action::HotReload => {
+            drop(completion_tx);
+            senders
+                .send_to_server(ServerInstruction::HotReload)
+                .with_context(err_context)?;
+        },
         Action::DumpLayout => {
             let default_shell = match default_shell {
                 Some(TerminalAction::RunCommand(run_command)) => Some(run_command.command),

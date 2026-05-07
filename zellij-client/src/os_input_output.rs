@@ -216,6 +216,9 @@ pub trait ClientOsApi: Send + Sync + std::fmt::Debug {
     fn handle_signals(&self, sigwinch_cb: Box<dyn Fn()>, quit_cb: Box<dyn Fn()>);
     /// Establish a connection with the server socket.
     fn connect_to_server(&self, path: &Path);
+    /// Reset the IPC connection Arcs so old threads can't interfere with a new session.
+    /// Called between hot reload reconnect iterations.
+    fn reset_server_connection(&mut self) {}
     fn load_palette(&self) -> Palette;
     fn enable_mouse(&self) -> Result<()>;
     fn disable_mouse(&self) -> Result<()>;
@@ -373,6 +376,16 @@ impl ClientOsApi for ClientOsInputOutput {
         let receiver = sender.get_receiver();
         *self.send_instructions_to_server.lock().unwrap() = Some(sender);
         *self.receive_instructions_from_server.lock().unwrap() = Some(receiver);
+    }
+    fn reset_server_connection(&mut self) {
+        self.send_instructions_to_server = Arc::new(Mutex::new(None));
+        self.receive_instructions_from_server = Arc::new(Mutex::new(None));
+        // Fresh reading_from_stdin so old stdin thread's buffered bytes don't interfere,
+        // and fresh session_name so the new session starts clean. The old stdin thread
+        // still holds the OLD session_name Arc (set to "{name}-reloading") which lets it
+        // detect the session ended and exit when it eventually reads from stdin.
+        self.reading_from_stdin = Arc::new(Mutex::new(None));
+        self.session_name = Arc::new(Mutex::new(None));
     }
     fn load_palette(&self) -> Palette {
         // this was removed because termbg doesn't release stdin in certain scenarios (we know of

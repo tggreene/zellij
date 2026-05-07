@@ -36,6 +36,10 @@ pub struct PaneLayoutManifest {
     pub title: Option<String>,
     pub is_focused: bool,
     pub pane_contents: Option<String>,
+    /// Original terminal_id, written to the layout as `id N` so resurrection
+    /// can claim the same id when re-spawning. Lets hot-reload's
+    /// fd-keyed-by-terminal-id lookup actually match across the restart.
+    pub preferred_terminal_id: Option<u32>,
 }
 
 pub fn serialize_session_layout(
@@ -182,6 +186,12 @@ fn serialize_tiled_pane(
     );
 
     serialize_tiled_layout_attributes(&layout, ignore_size, &mut tiled_pane_node);
+    if let Some(preferred_id) = layout.preferred_terminal_id {
+        tiled_pane_node.entries_mut().push(KdlEntry::new_prop(
+            "id",
+            KdlValue::Base10(preferred_id as i64),
+        ));
+    }
     let has_child_attributes = !layout.children.is_empty()
         || layout.external_children_index.is_some()
         || !args.is_empty()
@@ -363,7 +373,14 @@ fn serialize_tiled_layout_attributes(
             None => (),
         };
     }
-    if layout.borderless {
+    // borderless on a pane that has nested children is rejected by
+    // assert_no_mixed_children_and_properties — same pattern as cwd, gated
+    // on has-children. Borderless is a leaf-pane concept (compact-bar etc.)
+    // so practically this only fires if metadata is corrupt, but defensive
+    // serialization is cheap.
+    let has_children = !layout.children.is_empty()
+        || layout.external_children_index.is_some();
+    if layout.borderless && !has_children {
         kdl_node
             .entries_mut()
             .push(KdlEntry::new_prop("borderless", KdlValue::Bool(true)));
@@ -373,7 +390,12 @@ fn serialize_tiled_layout_attributes(
             .entries_mut()
             .push(KdlEntry::new_prop("stacked", KdlValue::Bool(true)));
     }
-    if layout.is_expanded_in_stack {
+    // The KDL parser rejects `expanded=true` on a pane whose parent isn't
+    // `stacked=true`. `ignore_size` here doubles as "parent is stacked"
+    // (set by serialize_tiled_pane when recursing into stacked children),
+    // so use it to gate the property and avoid producing layouts that
+    // refuse to round-trip.
+    if layout.is_expanded_in_stack && ignore_size {
         kdl_node
             .entries_mut()
             .push(KdlEntry::new_prop("expanded", KdlValue::Bool(true)));
@@ -659,6 +681,12 @@ fn serialize_floating_pane(
         has_children,
         &mut floating_pane_node,
     );
+    if let Some(preferred_id) = layout.preferred_terminal_id {
+        floating_pane_node.entries_mut().push(KdlEntry::new_prop(
+            "id",
+            KdlValue::Base10(preferred_id as i64),
+        ));
+    }
     serialize_start_suspended(&command, &mut floating_pane_node_children);
     serialize_floating_layout_attributes(&layout, &mut floating_pane_node_children);
     serialize_args(args, &mut floating_pane_node_children);
@@ -709,7 +737,15 @@ fn tiled_pane_layout_from_manifest(
     manifest: Option<&PaneLayoutManifest>,
     split_size: Option<SplitSize>,
 ) -> TiledPaneLayout {
-    let (run, borderless, is_expanded_in_stack, name, focus, pane_initial_contents) = manifest
+    let (
+        run,
+        borderless,
+        is_expanded_in_stack,
+        name,
+        focus,
+        pane_initial_contents,
+        preferred_terminal_id,
+    ) = manifest
         .map(|g| {
             let mut run = g.run.clone();
             if let Some(cwd) = &g.cwd {
@@ -726,9 +762,10 @@ fn tiled_pane_layout_from_manifest(
                 g.title.clone(),
                 Some(g.is_focused),
                 g.pane_contents.clone(),
+                g.preferred_terminal_id,
             )
         })
-        .unwrap_or((None, false, false, None, None, None));
+        .unwrap_or((None, false, false, None, None, None, None));
     TiledPaneLayout {
         split_size,
         run,
@@ -737,6 +774,7 @@ fn tiled_pane_layout_from_manifest(
         name,
         focus,
         pane_initial_contents,
+        preferred_terminal_id,
         ..Default::default()
     }
 }
@@ -844,6 +882,7 @@ fn get_floating_panes_layout_from_panegeoms(
                 already_running: false,
                 pane_initial_contents: m.pane_contents.clone(),
                 logical_position: None,
+                preferred_terminal_id: m.preferred_terminal_id,
             }
         })
         .collect()
@@ -2195,5 +2234,171 @@ mod tests {
             panic!("Constraint is nor a percent nor fixed");
         };
         dim
+    }
+
+    /// Round-trip property: anything serialize_session_layout produces must
+    /// be parseable by Layout::from_kdl. Catches the bug class we keep
+    /// stumbling on (args quoting on command panes, expanded=true outside a
+    /// stack, borderless on a parent with children, etc.) — every fix should
+    /// add a regression case here.
+    fn assert_roundtrips(manifest: GlobalLayoutManifest, label: &str) {
+        let (kdl, contents_files) =
+            serialize_session_layout(manifest).expect("serializer must succeed");
+        // Stage referenced contents files in a temp dir so the parser's
+        // file-relative reads don't error out.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let kdl_path = dir.path().join("session-layout.kdl");
+        for (name, body) in &contents_files {
+            std::fs::write(dir.path().join(name), body).unwrap();
+        }
+        std::fs::write(&kdl_path, &kdl).unwrap();
+        match crate::input::layout::Layout::from_kdl(
+            &kdl,
+            Some(kdl_path.display().to_string()),
+            None,
+            None,
+        ) {
+            Ok(_) => {},
+            Err(e) => panic!(
+                "[{}] serialized layout failed to round-trip:\n--- KDL ---\n{}\n--- ERROR ---\n{:#?}",
+                label, kdl, e
+            ),
+        }
+    }
+
+    fn pane_with_geom(geom_json: &str) -> PaneLayoutManifest {
+        PaneLayoutManifest {
+            geom: parse_panegeom_from_json(geom_json),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn roundtrip_simple_single_pane() {
+        let pane = pane_with_geom(PANEGEOMS_JSON[0][0]);
+        let tab = TabLayoutManifest {
+            tiled_panes: vec![pane],
+            ..Default::default()
+        };
+        let manifest = GlobalLayoutManifest {
+            tabs: vec![("Tab #1".to_owned(), tab)],
+            ..Default::default()
+        };
+        assert_roundtrips(manifest, "simple_single_pane");
+    }
+
+    #[test]
+    fn roundtrip_with_preferred_terminal_id() {
+        // hot reload writes `id=N` on each terminal pane. The parser must
+        // accept it (we extended is_a_valid_pane_property) and stash the
+        // value back in TiledPaneLayout::preferred_terminal_id.
+        let mut pane = pane_with_geom(PANEGEOMS_JSON[0][0]);
+        pane.preferred_terminal_id = Some(42);
+        let tab = TabLayoutManifest {
+            tiled_panes: vec![pane],
+            ..Default::default()
+        };
+        let manifest = GlobalLayoutManifest {
+            tabs: vec![("hr-tab".to_owned(), tab)],
+            ..Default::default()
+        };
+        assert_roundtrips(manifest, "preferred_terminal_id");
+    }
+
+    #[test]
+    fn roundtrip_command_pane_with_quoted_args() {
+        // The bug we hit: `populate_session_layout_metadata` derived args
+        // from `ps` output, which tokenizes on whitespace, so a long quoted
+        // arg like --append-system-prompt 'multi word' came back split. Hot
+        // reload now strips Run::Command before serialize, but a generic
+        // Run::Command should still round-trip cleanly.
+        use crate::input::command::RunCommand;
+        let run = Run::Command(RunCommand {
+            command: PathBuf::from("/bin/echo"),
+            args: vec!["--flag".into(), "value with spaces".into(), "more".into()],
+            cwd: None,
+            hold_on_close: false,
+            hold_on_start: false,
+            originating_plugin: None,
+            use_terminal_title: false,
+        });
+        let mut pane = pane_with_geom(PANEGEOMS_JSON[0][0]);
+        pane.run = Some(run);
+        let tab = TabLayoutManifest {
+            tiled_panes: vec![pane],
+            ..Default::default()
+        };
+        let manifest = GlobalLayoutManifest {
+            tabs: vec![("cmd-tab".to_owned(), tab)],
+            ..Default::default()
+        };
+        assert_roundtrips(manifest, "command_pane_with_quoted_args");
+    }
+
+    #[test]
+    fn roundtrip_pane_with_borderless() {
+        // Bug we hit: borderless was unconditionally emitted on tile-with-children
+        // panes; parser rejects that combo. Now gated. Verify a leaf borderless
+        // pane round-trips cleanly.
+        let mut pane = pane_with_geom(PANEGEOMS_JSON[0][0]);
+        pane.is_borderless = true;
+        let tab = TabLayoutManifest {
+            tiled_panes: vec![pane],
+            ..Default::default()
+        };
+        let manifest = GlobalLayoutManifest {
+            tabs: vec![("borderless-tab".to_owned(), tab)],
+            ..Default::default()
+        };
+        assert_roundtrips(manifest, "borderless_leaf_pane");
+    }
+
+    #[test]
+    fn roundtrip_pane_with_initial_contents() {
+        let mut pane = pane_with_geom(PANEGEOMS_JSON[0][0]);
+        pane.pane_contents = Some(
+            "some scrollback\nwith \"quotes\" and \\ backslashes\n".to_string(),
+        );
+        let tab = TabLayoutManifest {
+            tiled_panes: vec![pane],
+            ..Default::default()
+        };
+        let manifest = GlobalLayoutManifest {
+            tabs: vec![("scrollback-tab".to_owned(), tab)],
+            ..Default::default()
+        };
+        assert_roundtrips(manifest, "pane_with_initial_contents");
+    }
+
+    #[test]
+    fn roundtrip_multi_tab_with_preferred_ids() {
+        // The exact shape that was scrambling: multiple tabs, panes carrying
+        // different terminal_ids that need to land back where they came from.
+        let mut tabs = vec![];
+        let mut next_id = 0u32;
+        for (i, geom_set) in PANEGEOMS_JSON.iter().take(3).enumerate() {
+            let panes = geom_set
+                .iter()
+                .map(|g| {
+                    let mut p = pane_with_geom(g);
+                    p.preferred_terminal_id = Some(next_id);
+                    next_id += 1;
+                    p
+                })
+                .collect();
+            tabs.push((
+                format!("tab{}", i),
+                TabLayoutManifest {
+                    tiled_panes: panes,
+                    is_focused: i == 0,
+                    ..Default::default()
+                },
+            ));
+        }
+        let manifest = GlobalLayoutManifest {
+            tabs,
+            ..Default::default()
+        };
+        assert_roundtrips(manifest, "multi_tab_with_preferred_ids");
     }
 }

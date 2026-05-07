@@ -1851,7 +1851,8 @@ impl TryFrom<Action> for ProtobufAction {
                 coordinates: _,
             }
             | Action::SkipConfirm { action: _ }
-            | Action::SwitchSession { .. } => Err("Unsupported action"),
+            | Action::SwitchSession { .. }
+            | Action::HotReload => Err("Unsupported action"),
         }
     }
 }
@@ -2795,6 +2796,7 @@ impl TryFrom<ProtobufTiledPaneLayout> for TiledPaneLayout {
             run_instructions_to_ignore,
             hide_floating_panes: protobuf.hide_floating_panes,
             pane_initial_contents: protobuf.pane_initial_contents,
+            preferred_terminal_id: None, // not serialized over plugin protobuf
         })
     }
 }
@@ -2850,6 +2852,7 @@ impl TryFrom<ProtobufFloatingPaneLayout> for FloatingPaneLayout {
             already_running: protobuf.already_running,
             pane_initial_contents: protobuf.pane_initial_contents,
             logical_position: protobuf.logical_position.map(|p| p as usize),
+            preferred_terminal_id: None,
         })
     }
 }

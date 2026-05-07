@@ -533,6 +533,7 @@ pub enum ServerContext {
     WebServerStarted,
     FailedToStartWebServer,
     SendWebClientsForbidden,
+    HotReload,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

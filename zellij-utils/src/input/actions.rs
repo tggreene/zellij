@@ -171,6 +171,8 @@ pub enum Action {
     },
     /// Dumps
     DumpLayout,
+    /// Hot reload the server binary via exec()
+    HotReload,
     /// Lists all panes as JSON
     ListPanes,
     /// Scroll up in focus pane.
@@ -556,6 +558,7 @@ impl Action {
                 include_scrollback: full,
             }]),
             CliAction::DumpLayout { .. } => Ok(vec![Action::DumpLayout]),
+            CliAction::HotReload => Ok(vec![Action::HotReload]),
             CliAction::EditScrollback => Ok(vec![Action::EditScrollback]),
             CliAction::ScrollUp => Ok(vec![Action::ScrollUp]),
             CliAction::ScrollDown => Ok(vec![Action::ScrollDown]),

@@ -307,6 +307,30 @@ impl SessionLayoutMetadata {
         }
         plugin_ids
     }
+    /// Strip Run::Command from terminal panes — used during hot reload
+    /// serialization. The live PTY survives across the reload (the fd-daemon
+    /// holds the master), so the new server doesn't need to re-launch any
+    /// command. Plus, our only source for the "what's running here" string
+    /// is `ps` output, which loses argv quoting and round-trips into broken
+    /// KDL ('claude --append-system-prompt "Multiple words"' becomes
+    /// `args "claude" "--append-system-prompt" "Multiple" "words"`).
+    pub fn strip_command_runs_from_terminal_panes(&mut self) {
+        let strip = |pane: &mut PaneLayoutMetadata| {
+            if let PaneId::Terminal(_) = pane.id {
+                if let Some(Run::Command(_)) = &pane.run {
+                    pane.run = None;
+                }
+            }
+        };
+        for tab in self.tabs.iter_mut() {
+            for pane in tab.tiled_panes.iter_mut() {
+                strip(pane);
+            }
+            for pane in tab.floating_panes.iter_mut() {
+                strip(pane);
+            }
+        }
+    }
     pub fn update_terminal_commands(
         &mut self,
         mut terminal_ids_to_commands: HashMap<u32, Vec<String>>,
@@ -426,6 +450,10 @@ impl Into<TabLayoutManifest> for TabLayoutMetadata {
 
 impl Into<PaneLayoutManifest> for PaneLayoutMetadata {
     fn into(self) -> PaneLayoutManifest {
+        let preferred_terminal_id = match self.id {
+            PaneId::Terminal(id) => Some(id),
+            PaneId::Plugin(_) => None,
+        };
         PaneLayoutManifest {
             geom: self.geom,
             run: self.run,
@@ -434,6 +462,7 @@ impl Into<PaneLayoutManifest> for PaneLayoutMetadata {
             title: self.title,
             is_focused: self.is_focused,
             pane_contents: self.pane_contents,
+            preferred_terminal_id,
         }
     }
 }

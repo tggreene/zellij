@@ -190,7 +190,43 @@ pub(crate) fn background_jobs_main(
                 *current_session_plugin_list.lock().unwrap() = plugin_list;
             },
             BackgroundJob::ReportLayoutInfo(session_layout) => {
-                *current_session_layout.lock().unwrap() = session_layout;
+                // Update the in-memory cache (used by the polling task) AND
+                // write to disk synchronously so callers (like hot reload)
+                // don't have to wait for the next poll tick to know the
+                // layout has been persisted.
+                //
+                // Before persisting, validate that the layout we just produced
+                // actually round-trips through the parser. If we hit a
+                // serializer bug (we've shipped a few — bad args quoting,
+                // expanded-without-stack, borderless-with-children) writing
+                // the broken layout would silently corrupt the on-disk cache
+                // and the next resurrection would fall back to the default
+                // layout, losing tabs. Better to keep the previous good cache.
+                let layout_kdl = &session_layout.0;
+                if !layout_kdl.is_empty() {
+                    if let Err(e) = zellij_utils::input::layout::Layout::from_kdl(
+                        layout_kdl,
+                        None,
+                        None,
+                        None,
+                    ) {
+                        log::error!(
+                            "Refusing to persist serialized layout — it doesn't \
+                             round-trip through the parser: {}. The previous \
+                             cached layout (if any) is preserved.",
+                            e
+                        );
+                        continue;
+                    }
+                }
+                *current_session_layout.lock().unwrap() = session_layout.clone();
+                if !disable_session_metadata {
+                    let session_name = current_session_name.lock().unwrap().to_string();
+                    if !session_name.is_empty() {
+                        let session_info = current_session_info.lock().unwrap().clone();
+                        write_session_state_to_disk(session_name, session_info, session_layout);
+                    }
+                }
             },
             BackgroundJob::ReadAllSessionInfosOnMachine => {
                 // this job should only be run once and it keeps track of other sessions (as well

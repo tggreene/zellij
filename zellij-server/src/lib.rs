@@ -3,6 +3,7 @@ pub mod output;
 pub mod panes;
 pub mod tab;
 
+pub mod hot_reload;
 mod background_jobs;
 mod global_async_runtime;
 mod logging_pipe;
@@ -89,6 +90,7 @@ pub enum ServerInstruction {
     },
     Error(String),
     KillSession,
+    HotReload,
     DetachSession(Vec<ClientId>, Option<NotificationEnd>),
     AttachClient(
         CliAssets,
@@ -143,6 +145,7 @@ impl From<&ServerInstruction> for ServerContext {
             ServerInstruction::EjectAllOtherClients { .. } => ServerContext::RemoveClient,
             ServerInstruction::Error(_) => ServerContext::Error,
             ServerInstruction::KillSession => ServerContext::KillSession,
+            ServerInstruction::HotReload => ServerContext::HotReload,
             ServerInstruction::DetachSession(..) => ServerContext::DetachSession,
             ServerInstruction::AttachClient(..) => ServerContext::AttachClient,
             ServerInstruction::AttachWatcherClient(..) => ServerContext::AttachClient,
@@ -630,9 +633,18 @@ impl SessionState {
     }
 }
 
+extern "C" fn server_signal_handler(sig: libc::c_int) {
+    // Write directly to the log file since we're in a signal handler
+    log::error!("SERVER received signal {} - process being killed", sig);
+    // Re-raise so the default handler runs
+    unsafe {
+        libc::signal(sig, libc::SIG_DFL);
+        libc::raise(sig);
+    }
+}
+
 pub fn start_server(mut os_input: Box<dyn ServerOsApi>, socket_path: PathBuf) {
     info!("Starting Zellij server!");
-
     // preserve the current umask: read current value by setting to another mode, and then restoring it
     let current_umask = umask(Mode::all());
     umask(current_umask);
@@ -644,6 +656,13 @@ pub fn start_server(mut os_input: Box<dyn ServerOsApi>, socket_path: PathBuf) {
 
     envs::set_zellij("0".to_string());
 
+    // Log signals that could kill us silently
+    unsafe {
+        libc::signal(libc::SIGTERM, server_signal_handler as libc::sighandler_t);
+        libc::signal(libc::SIGINT, server_signal_handler as libc::sighandler_t);
+        libc::signal(libc::SIGHUP, server_signal_handler as libc::sighandler_t);
+    }
+
     let (to_server, server_receiver): ChannelWithContext<ServerInstruction> = channels::bounded(50);
     let to_server = SenderWithContext::new(to_server);
     let session_data: Arc<RwLock<Option<SessionMetaData>>> = Arc::new(RwLock::new(None));
@@ -653,6 +672,18 @@ pub fn start_server(mut os_input: Box<dyn ServerOsApi>, socket_path: PathBuf) {
         use zellij_utils::errors::handle_panic;
         let to_server = to_server.clone();
         Box::new(move |info| {
+            // Log immediately before handle_panic, which may call process::exit
+            // on the main thread without flushing logs
+            let thread = std::thread::current();
+            let thread_name = thread.name().unwrap_or("unnamed");
+            let msg = match info.payload().downcast_ref::<&'static str>() {
+                Some(s) => s.to_string(),
+                None => info.payload().downcast_ref::<String>()
+                    .cloned()
+                    .unwrap_or_else(|| "unknown panic".to_string()),
+            };
+            let location = info.location().map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column())).unwrap_or_default();
+            log::error!("SERVER PANIC on thread '{}' at {}: {}", thread_name, location, msg);
             handle_panic(info, Some(&to_server));
         })
     });
@@ -709,7 +740,13 @@ pub fn start_server(mut os_input: Box<dyn ServerOsApi>, socket_path: PathBuf) {
         });
 
     loop {
-        let (instruction, mut err_ctx) = server_receiver.recv().unwrap();
+        let (instruction, mut err_ctx) = match server_receiver.recv() {
+            Ok(msg) => msg,
+            Err(e) => {
+                log::error!("Server main loop: channel disconnected ({:?}), all senders dropped - exiting", e);
+                break;
+            }
+        };
         err_ctx.add_call(ContextType::IPCServer((&instruction).into()));
         match instruction {
             ServerInstruction::FirstClientConnected(cli_assets, is_web_client, client_id) => {
@@ -747,6 +784,24 @@ pub fn start_server(mut os_input: Box<dyn ServerOsApi>, socket_path: PathBuf) {
                         hide_session_name: config.ui.pane_frames.hide_session_name,
                     },
                 };
+
+                // Try to retrieve hot reload fds from the daemon before init
+                // (init_session triggers resurrection which spawns terminals)
+                if let Ok(session_name) = zellij_utils::envs::get_session_name() {
+                    crate::hot_reload::try_retrieve_fds_from_daemon(&session_name);
+                    if crate::hot_reload::has_hot_reload_fds() {
+                        // Resurrection is layout-driven: panes spawn as the
+                        // user activates tabs. After a settling window, close
+                        // anything orphaned and tell the daemon it can exit.
+                        std::thread::Builder::new()
+                            .name("hot_reload_cleanup".into())
+                            .spawn(|| {
+                                std::thread::sleep(std::time::Duration::from_secs(60));
+                                crate::hot_reload::cleanup_unused_hot_reload_fds();
+                            })
+                            .ok();
+                    }
+                }
 
                 let mut session = init_session(
                     os_input.clone(),
@@ -1257,6 +1312,92 @@ pub fn start_server(mut os_input: Box<dyn ServerOsApi>, socket_path: PathBuf) {
                         .unwrap();
                 }
             },
+            ServerInstruction::HotReload => {
+                log::info!("Hot reload: storing fds with daemon");
+                crate::hot_reload::set_hot_reload_in_progress();
+
+                let session_name = zellij_utils::envs::get_session_name()
+                    .unwrap_or_else(|_| "unknown".to_string());
+
+                // Store all PTY master fds with the fd daemon
+                let terminal_id_to_raw_fd = os_input.get_terminal_id_to_raw_fd();
+                match crate::hot_reload::store_fds_with_daemon(
+                    &session_name,
+                    &terminal_id_to_raw_fd,
+                ) {
+                    Ok(()) => {
+                        log::info!(
+                            "Hot reload: stored {} fds with daemon",
+                            terminal_id_to_raw_fd.values().filter(|v| v.is_some()).count()
+                        );
+                    }
+                    Err(e) => {
+                        log::error!("Hot reload: failed to store fds: {}", e);
+                        break;
+                    }
+                }
+
+                // Force layout serialization (even if session_serialization is
+                // disabled) and wait for the file to actually hit disk before
+                // exiting — otherwise resurrection comes back with the
+                // built-in default layout and tabs get lost.
+                if let Some(session_data) = session_data.read().unwrap().as_ref() {
+                    let layout_file = zellij_utils::consts::session_layout_cache_file_name(
+                        &session_name,
+                    );
+                    let pre_serialize = std::fs::metadata(&layout_file)
+                        .and_then(|m| m.modified())
+                        .ok();
+
+                    let _ = session_data
+                        .senders
+                        .send_to_screen(ScreenInstruction::ForceSerializeLayout);
+
+                    let deadline = std::time::Instant::now()
+                        + std::time::Duration::from_secs(5);
+                    let mut waited_ms = 0u64;
+                    loop {
+                        if std::time::Instant::now() >= deadline {
+                            log::error!(
+                                "Hot reload: timed out waiting for {} to be written; \
+                                 resurrection may be incomplete",
+                                layout_file.display()
+                            );
+                            break;
+                        }
+                        if let Ok(modified) = std::fs::metadata(&layout_file)
+                            .and_then(|m| m.modified())
+                        {
+                            if pre_serialize.map(|p| modified > p).unwrap_or(true) {
+                                log::info!(
+                                    "Hot reload: layout written to {} after {}ms",
+                                    layout_file.display(), waited_ms
+                                );
+                                break;
+                            }
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                        waited_ms += 50;
+                    }
+                }
+
+                // Tell clients to reconnect via HotReload exit reason.
+                // The client handles this by waiting for the server to die,
+                // then re-attaching to the same session name.
+                let client_ids = session_state.read().unwrap().client_ids();
+                for client_id in client_ids {
+                    let _ = os_input.send_to_client(
+                        client_id,
+                        ServerToClientMsg::Exit {
+                            exit_reason: ExitReason::HotReload,
+                        },
+                    );
+                    remove_client!(client_id, os_input, session_state);
+                }
+
+                // Server exits - daemon holds the fds safe.
+                break;
+            },
             ServerInstruction::KillSession => {
                 let client_ids = session_state.read().unwrap().client_ids();
                 for client_id in client_ids {
@@ -1706,9 +1847,11 @@ pub fn start_server(mut os_input: Box<dyn ServerOsApi>, socket_path: PathBuf) {
     }
 
     // Drop cached session data before exit.
+    log::info!("Server main loop exited, cleaning up...");
     *session_data.write().unwrap() = None;
 
     drop(std::fs::remove_file(&socket_path));
+    log::info!("Server process exiting normally");
 }
 
 fn init_session(

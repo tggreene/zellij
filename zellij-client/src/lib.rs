@@ -499,8 +499,7 @@ pub fn start_remote_client(
     os_input.set_raw_mode(0);
     let _ = os_input
         .get_stdout_writer()
-        .write(bracketed_paste.as_bytes())
-        .unwrap();
+        .write(bracketed_paste.as_bytes());
 
     std::panic::set_hook({
         use zellij_utils::errors::handle_panic;
@@ -555,8 +554,8 @@ pub fn start_remote_client(
     } else {
         let clear_screen = "\u{1b}[2J";
         let mut stdout = os_input.get_stdout_writer();
-        let _ = stdout.write(clear_screen.as_bytes()).unwrap();
-        stdout.flush().unwrap();
+        let _ = stdout.write(clear_screen.as_bytes());
+        let _ = stdout.flush();
     }
 
     Ok(reconnect_to_session)
@@ -785,8 +784,7 @@ pub fn start_client(
     os_input.set_raw_mode(0);
     let _ = os_input
         .get_stdout_writer()
-        .write(bracketed_paste.as_bytes())
-        .unwrap();
+        .write(bracketed_paste.as_bytes());
 
     let (send_client_instructions, receive_client_instructions): ChannelWithContext<
         ClientInstruction,
@@ -899,16 +897,18 @@ pub fn start_client(
                     },
                     None => {
                         consecutive_unknown_messages_received += 1;
+                        if consecutive_unknown_messages_received == 1 {
+                            log::warn!("Server connection interrupted (socket EOF)");
+                        }
                         send_client_instructions
                             .send(ClientInstruction::UnblockInputThread)
                             .unwrap();
-                        log::error!("Received unknown message from server");
-                        if consecutive_unknown_messages_received >= 1000 {
-                            send_client_instructions
-                                .send(ClientInstruction::Error(
-                                    "Received empty unknown from server".to_string(),
-                                ))
-                                .unwrap();
+                        // Sleep to avoid CPU spinning on a broken socket.
+                        // Use a generous threshold - the server may be shutting down
+                        // normally (e.g. last tab closed) and Exit message is in flight.
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        if consecutive_unknown_messages_received >= 500 {
+                            log::error!("Server socket dead after 5s, forcing exit");
                             break;
                         }
                     },
@@ -943,10 +943,11 @@ pub fn start_client(
     };
 
     let mut stdout = os_input.get_stdout_writer();
-    stdout
-        .write_all("\u{1b}[1m\u{1b}[HLoading Zellij\u{1b}[m\n\r".as_bytes())
-        .expect("cannot write to stdout");
-    stdout.flush().expect("could not flush");
+    let hide_cursor = if is_a_reconnect { "\u{1b}[?25l" } else { "" };
+    if let Err(e) = stdout.write_all(format!("{}\u{1b}[1m\u{1b}[HLoading Zellij\u{1b}[m\n\r", hide_cursor).as_bytes()) {
+        log::error!("Failed to write loading message to stdout: {}", e);
+    }
+    let _ = stdout.flush();
 
     loop {
         let (client_instruction, mut err_ctx) = if !loading && !pending_instructions.is_empty() {
@@ -963,16 +964,14 @@ pub fn start_client(
             // when the app is still loading, we buffer instructions and show a loading screen
             match client_instruction {
                 ClientInstruction::StartedParsingStdinQuery => {
-                    stdout
-                        .write_all("Querying terminal emulator for \u{1b}[32;1mdefault colors\u{1b}[m and \u{1b}[32;1mpixel/cell\u{1b}[m ratio...".as_bytes())
-                        .expect("cannot write to stdout");
-                    stdout.flush().expect("could not flush");
+                    let _ = stdout
+                        .write_all("Querying terminal emulator for \u{1b}[32;1mdefault colors\u{1b}[m and \u{1b}[32;1mpixel/cell\u{1b}[m ratio...".as_bytes());
+                    let _ = stdout.flush();
                 },
                 ClientInstruction::DoneParsingStdinQuery => {
-                    stdout
-                        .write_all("done".as_bytes())
-                        .expect("cannot write to stdout");
-                    stdout.flush().expect("could not flush");
+                    let _ = stdout
+                        .write_all("done".as_bytes());
+                    let _ = stdout.flush();
                     loading = false;
                 },
                 instruction => {
@@ -988,6 +987,24 @@ pub fn start_client(
             ClientInstruction::Exit(reason) => {
                 os_input.send_to_server(ClientToServerMsg::ClientExited);
 
+                if let ExitReason::HotReload = reason {
+                    // Hot reload: set up reconnect, wait happens after cleanup
+                    let session_name = zellij_utils::envs::get_session_name()
+                        .unwrap_or_else(|_| "unknown".to_string());
+                    // Change session name so old stdin handler detects "Session ended"
+                    // and releases its lock on stdin for the reconnected client
+                    os_input.update_session_name(format!("{}-reloading", session_name));
+                    std::env::remove_var(zellij_utils::envs::SESSION_NAME_ENV_KEY);
+                    reconnect_to_session = Some(ConnectToSession {
+                        name: Some(session_name),
+                        tab_position: None,
+                        pane_id: None,
+                        layout: None,
+                        cwd: None,
+                    });
+                    break;
+                }
+
                 if let ExitReason::Error(_) = reason {
                     handle_error(reason.to_string());
                 }
@@ -999,20 +1016,19 @@ pub fn start_client(
             },
             ClientInstruction::Render(output) => {
                 let mut stdout = os_input.get_stdout_writer();
-                if let Some(sync) = synchronised_output {
-                    stdout
-                        .write_all(sync.start_seq())
-                        .expect("cannot write to stdout");
+                let write_result = (|| -> std::io::Result<()> {
+                    if let Some(sync) = synchronised_output {
+                        stdout.write_all(sync.start_seq())?;
+                    }
+                    stdout.write_all(output.as_bytes())?;
+                    if let Some(sync) = synchronised_output {
+                        stdout.write_all(sync.end_seq())?;
+                    }
+                    stdout.flush()
+                })();
+                if let Err(e) = write_result {
+                    log::error!("Failed to write to stdout: {} - skipping render", e);
                 }
-                stdout
-                    .write_all(output.as_bytes())
-                    .expect("cannot write to stdout");
-                if let Some(sync) = synchronised_output {
-                    stdout
-                        .write_all(sync.end_seq())
-                        .expect("cannot write to stdout");
-                }
-                stdout.flush().expect("could not flush");
             },
             ClientInstruction::UnblockInputThread => {
                 command_is_executing.unblock_input_thread();
@@ -1078,23 +1094,43 @@ pub fn start_client(
 
         os_input.disable_mouse().non_fatal();
         info!("{}", exit_msg);
-        os_input.unset_raw_mode(0).unwrap();
+        let _ = os_input.unset_raw_mode(0);
         let mut stdout = os_input.get_stdout_writer();
         let exit_kitty_keyboard_mode = "\u{1b}[<1u";
         if !explicitly_disable_kitty_keyboard_protocol {
-            let _ = stdout.write(exit_kitty_keyboard_mode.as_bytes()).unwrap();
-            stdout.flush().unwrap();
+            let _ = stdout.write(exit_kitty_keyboard_mode.as_bytes());
+            let _ = stdout.flush();
         }
-        let _ = stdout.write(goodbye_message.as_bytes()).unwrap();
-        stdout.flush().unwrap();
+        let _ = stdout.write(goodbye_message.as_bytes());
+        let _ = stdout.flush();
     } else {
         let clear_screen = "\u{1b}[2J";
         let mut stdout = os_input.get_stdout_writer();
-        let _ = stdout.write(clear_screen.as_bytes()).unwrap();
-        stdout.flush().unwrap();
+        let _ = stdout.write(clear_screen.as_bytes());
+        let _ = stdout.flush();
+    }
+
+    // Hide cursor during reconnect transition - server will restore it after rendering
+    if reconnect_to_session.is_some() {
+        let mut stdout = os_input.get_stdout_writer();
+        let _ = stdout.write(b"\x1b[?25l");
+        let _ = stdout.flush();
     }
 
     let _ = send_input_instructions.send(InputInstruction::Exit);
+
+    // For hot reload: wait for old server to fully die before reconnecting
+    if let Some(ref reconnect) = reconnect_to_session {
+        if let Some(ref session_name) = reconnect.name {
+            for _ in 0..50 {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                match zellij_utils::sessions::session_exists(session_name) {
+                    Ok(true) => continue,
+                    _ => break,
+                }
+            }
+        }
+    }
 
     reconnect_to_session
 }

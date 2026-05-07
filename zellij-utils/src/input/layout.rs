@@ -753,6 +753,8 @@ pub struct FloatingPaneLayout {
     pub already_running: bool,
     pub pane_initial_contents: Option<String>,
     pub logical_position: Option<usize>,
+    /// See TiledPaneLayout::preferred_terminal_id.
+    pub preferred_terminal_id: Option<u32>,
 }
 
 impl FloatingPaneLayout {
@@ -769,6 +771,7 @@ impl FloatingPaneLayout {
             already_running: false,
             pane_initial_contents: None,
             logical_position: None,
+            preferred_terminal_id: None,
         }
     }
     pub fn add_cwd_to_layout(&mut self, cwd: &PathBuf) {
@@ -813,6 +816,11 @@ pub struct TiledPaneLayout {
     pub run_instructions_to_ignore: Vec<Option<Run>>,
     pub hide_floating_panes: bool, // only relevant if this is the base layout
     pub pane_initial_contents: Option<String>,
+    /// If set during resurrection, the spawning pane should claim this
+    /// terminal_id rather than auto-incrementing. Used by hot reload to
+    /// round-trip terminal_id through the layout file so PTY masters
+    /// stored in the fd-daemon match their original panes after restart.
+    pub preferred_terminal_id: Option<u32>,
 }
 
 impl TiledPaneLayout {
@@ -940,6 +948,31 @@ impl TiledPaneLayout {
             }
         }
         Ok(layouts)
+    }
+    /// Mirrors `extract_run_instructions` but returns `preferred_terminal_id`
+    /// for each pane in the same order. Caller can zip the two to learn what
+    /// id each soon-to-be-spawned pane wants. Used by hot reload so the new
+    /// server's terminal_id allocation matches the original session's, which
+    /// in turn lets the fd-daemon's keyed lookup return the right master fd.
+    pub fn extract_preferred_terminal_ids(&self) -> Vec<Option<u32>> {
+        let mut ids = vec![];
+        if self.children.is_empty() {
+            ids.push(self.preferred_terminal_id);
+        }
+        let mut ids_of_children = vec![];
+        for child in &self.children {
+            let mut child_ids = child.extract_preferred_terminal_ids();
+            if !child_ids.is_empty() {
+                ids.push(child_ids.remove(0));
+            }
+            ids_of_children.append(&mut child_ids);
+        }
+        ids.append(&mut ids_of_children);
+        // Note: `extract_run_instructions` strips entries listed in
+        // run_instructions_to_ignore. We mirror that order; if the lengths
+        // diverge after ignore-stripping, callers should fall back to no
+        // preferred id rather than mismatching.
+        ids
     }
     pub fn extract_run_instructions(&self) -> Vec<Option<Run>> {
         // the order of these run instructions is significant and needs to be the same

@@ -237,6 +237,10 @@ fn individual_messages_client(
                     break;
                 },
             },
+            None => {
+                // Server disconnected (e.g. during hot reload)
+                break;
+            },
             _ => {},
         }
     }

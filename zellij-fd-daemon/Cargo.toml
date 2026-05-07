@@ -1,0 +1,23 @@
+[package]
+name = "zellij-fd-daemon"
+version = "0.1.0"
+edition = "2021"
+description = "A tiny daemon that holds PTY file descriptors across zellij binary upgrades"
+
+[[bin]]
+name = "zellij-fd-daemon"
+path = "src/main.rs"
+
+[lib]
+name = "zellij_fd_daemon"
+path = "src/lib.rs"
+
+[dependencies]
+nix = { workspace = true }
+libc = { workspace = true }
+log = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

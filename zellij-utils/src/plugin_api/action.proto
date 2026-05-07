@@ -443,6 +443,7 @@ enum ActionName {
     NewInPlacePane = 92;
     OverrideLayout = 93;
     TabJumpInput = 94;
+    HotReload = 95;
 }
 
 message Position {

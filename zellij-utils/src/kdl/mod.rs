@@ -44,6 +44,7 @@ macro_rules! parse_kdl_action_arguments {
         } else {
             match $action_name {
                 "Quit" => Ok(Action::Quit),
+                "HotReload" => Ok(Action::HotReload),
                 "FocusNextPane" => Ok(Action::FocusNextPane),
                 "FocusPreviousPane" => Ok(Action::FocusPreviousPane),
                 "SwitchFocus" => Ok(Action::SwitchFocus),
@@ -604,6 +605,7 @@ impl Action {
     pub fn to_kdl(&self) -> Option<KdlNode> {
         match self {
             Action::Quit => Some(KdlNode::new("Quit")),
+            Action::HotReload => Some(KdlNode::new("HotReload")),
             Action::Write {
                 key_with_modifier: _key,
                 bytes,
@@ -1442,6 +1444,7 @@ impl TryFrom<(&KdlNode, &Options)> for Action {
         let action_children: Vec<&KdlDocument> = kdl_children!(kdl_action);
         match action_name {
             "Quit" => parse_kdl_action_arguments!(action_name, action_arguments, kdl_action),
+            "HotReload" => parse_kdl_action_arguments!(action_name, action_arguments, kdl_action),
             "FocusNextPane" => {
                 parse_kdl_action_arguments!(action_name, action_arguments, kdl_action)
             },

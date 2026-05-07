@@ -57,6 +57,7 @@ members = [
     "zellij-tile",
     "zellij-tile-utils",
     "xtask",
+    "zellij-fd-daemon",
     ".",
 ]
 

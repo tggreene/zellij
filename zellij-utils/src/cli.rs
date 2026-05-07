@@ -650,6 +650,8 @@ pub enum CliAction {
         #[clap(long, value_parser, default_value("false"), takes_value(false))]
         cached: bool,
     },
+    /// Hot reload: exec() the current binary to upgrade in-place, preserving all sessions
+    HotReload,
     /// Open the pane scrollback in your default editor
     EditScrollback,
     /// Scroll up in the focused pane
