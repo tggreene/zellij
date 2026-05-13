@@ -966,6 +966,21 @@ impl TerminalCharacter {
     pub fn width(&self) -> usize {
         self.width as usize
     }
+
+    /// Whether this cell carries a visible background-color SGR (not None, not Reset).
+    ///
+    /// Used by reflow to decide whether a trailing whitespace cell is
+    /// trim-able. A space with a real background colour (e.g. a UI fill
+    /// emitted as `\x1b[48;5;Nm   \x1b[m`) is *visible* content and must
+    /// not be silently dropped during resize. See zellij-org/zellij#4122.
+    pub fn has_visible_background(&self) -> bool {
+        match self.styles.background {
+            Some(AnsiCode::NamedColor(_))
+            | Some(AnsiCode::RgbCode(_))
+            | Some(AnsiCode::ColorIndex(_)) => true,
+            _ => false,
+        }
+    }
 }
 
 impl ::std::fmt::Debug for TerminalCharacter {

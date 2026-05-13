@@ -863,11 +863,18 @@ impl Grid {
             }
 
             // trim lines after the last empty space that has no following character, because
-            // terminals don't trim empty lines
+            // terminals don't trim empty lines.
+            //
+            // A whitespace cell with a visible background colour counts as content
+            // (a UI fill, e.g. tool-call card backgrounds in TUIs). Trimming those
+            // strips the bg on reflow and looks like an off-by-focus rendering bug.
+            // See #4122.
             for line in &mut viewport_canonical_lines {
                 let mut trim_at = None;
                 for (index, character) in line.columns.iter().enumerate() {
-                    if character.character != EMPTY_TERMINAL_CHARACTER.character {
+                    if character.character != EMPTY_TERMINAL_CHARACTER.character
+                        || character.has_visible_background()
+                    {
                         trim_at = None;
                     } else if trim_at.is_none() {
                         trim_at = Some(index);

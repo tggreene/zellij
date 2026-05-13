@@ -40,6 +40,7 @@ fn get_cwd() {
         client_senders: Arc::default(),
         terminal_id_to_raw_fd: Arc::default(),
         cached_resizes: Arc::default(),
+        next_preferred_terminal_id: Arc::default(),
     };
 
     let pid = nix::unistd::getpid();

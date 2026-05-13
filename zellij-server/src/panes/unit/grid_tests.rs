@@ -3955,3 +3955,61 @@ fn osc_7777_sets_secondary_title() {
     }
     assert_eq!(grid.secondary_title, None);
 }
+
+// Regression: zellij-org/zellij#4122 — trailing whitespace with a real
+// background colour was being trimmed on reflow, dropping the bg when the
+// pane lost focus (any layout change triggered the resize/reflow path).
+//
+// Repro at the unit-test layer: render a line ending in a bg-painted space,
+// resize to a narrower width to force reflow, then serialise. The serialised
+// output must still carry the bg SGR around the trailing space.
+#[test]
+fn trailing_whitespace_with_background_survives_reflow() {
+    let mut vte_parser = vte::Parser::new();
+    let sixel_image_store = Rc::new(RefCell::new(SixelImageStore::default()));
+    let terminal_emulator_color_codes = Rc::new(RefCell::new(HashMap::new()));
+    let debug = false;
+    let arrow_fonts = true;
+    let styled_underlines = true;
+    let explicitly_disable_kitty_keyboard_protocol = false;
+    let mut grid = Grid::new(
+        4,
+        20,
+        Rc::new(RefCell::new(Palette::default())),
+        terminal_emulator_color_codes,
+        Rc::new(RefCell::new(LinkHandler::new())),
+        Rc::new(RefCell::new(None)),
+        sixel_image_store,
+        Style::default(),
+        debug,
+        arrow_fonts,
+        styled_underlines,
+        explicitly_disable_kitty_keyboard_protocol,
+    );
+
+    // "HELLO " with a red background. The trailing space is the cell we care
+    // about: it's a space char *with* a meaningful bg, so reflow must keep it.
+    let content = b"\x1b[41mHELLO \x1b[m";
+    for b in content {
+        vte_parser.advance(&mut grid, *b);
+    }
+
+    // Force a reflow by shrinking the width (and back), the same way a new
+    // sibling pane would.
+    grid.change_size(4, 10);
+    grid.change_size(4, 20);
+
+    let serialised = grid.serialize(None).expect("grid serialises");
+    // The bug: reflow trims the trailing-space cell because it doesn't check
+    // for a real background. With the bug, the serialised output reads
+    // "...\x1b[41m...HELLO" (no trailing space — the bg-painted space was
+    // dropped). With the fix it reads "...\x1b[41m...HELLO " (space kept).
+    //
+    // We assert directly on the literal: "HELLO " must appear in the output.
+    assert!(
+        serialised.contains("HELLO "),
+        "expected the bg-painted trailing space after 'HELLO' to survive \
+         reflow, but it was trimmed; serialised output:\n{:?}",
+        serialised
+    );
+}
