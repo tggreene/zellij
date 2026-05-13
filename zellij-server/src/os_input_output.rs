@@ -704,8 +704,29 @@ impl ServerOsApi for ServerOsInputOutput {
                                     nudge_winsize_for_redraw(reused_fd, terminal_id);
                                 })
                                 .ok();
-                            // pid_primary = master fd; child_fd = 0 (child already running)
-                            return Ok((terminal_id, reused_fd, 0));
+                            // Recover the foreground process group's pid from
+                            // the master fd. The shell (or whatever's foreground
+                            // in the slave) is still alive across hot reload,
+                            // and its pid is what later code uses to resolve
+                            // the pane's cwd. Without this, child_fd=0 here
+                            // gets cached as the child pid; Pid::from_raw(0)
+                            // resolves to the zellij server itself on macOS,
+                            // so new panes spawned off this one inherit the
+                            // server's cwd (typically ~/) instead of the
+                            // shell's actual cwd.
+                            let child_pid = unistd::tcgetpgrp(reused_fd)
+                                .map(|pgrp| libc::pid_t::from(pgrp))
+                                .unwrap_or(0);
+                            if child_pid <= 0 {
+                                log::warn!(
+                                    "Hot reload: tcgetpgrp on terminal_id {} returned {} \
+                                     — cwd inheritance for new panes spawned off this one \
+                                     will fall through to the server's cwd",
+                                    terminal_id, child_pid,
+                                );
+                            }
+                            // pid_primary = master fd; child_fd = foreground pgid (or 0)
+                            return Ok((terminal_id, reused_fd, child_pid));
                         },
                         Err(e) => {
                             log::error!(

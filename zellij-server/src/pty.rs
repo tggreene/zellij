@@ -931,9 +931,16 @@ impl Pty {
                     .and_then(|pane| match pane {
                         PaneId::Plugin(plugin_id) => self.plugin_cwds.get(plugin_id).cloned(),
                         PaneId::Terminal(id) => {
-                            // Try to get CWD from OS, fall back to cached value
+                            // Try to get CWD from OS, fall back to cached value.
+                            // Skip pid<=0 — it's meaningless (Pid::from_raw(0)
+                            // resolves to the zellij server's own cwd on macOS),
+                            // and can sneak in via hot-reload paths where the
+                            // child pid isn't recoverable. Better to fall
+                            // straight through to the cached cwd than to leak
+                            // the server's cwd into newly spawned panes.
                             self.id_to_child_pid
                                 .get(id)
+                                .filter(|&&pid| pid > 0)
                                 .and_then(|&pid| {
                                     self.bus
                                         .os_input
@@ -951,9 +958,13 @@ impl Pty {
             if run_command.cwd.is_none() {
                 run_command.cwd = match pane_id {
                     PaneId::Terminal(terminal_pane_id) => {
-                        // Try to get CWD from OS, fall back to cached value
+                        // See note in fill_cwd: pid<=0 means we lost track of
+                        // the child (typically across hot-reload). Fall
+                        // through to the cached value rather than asking the
+                        // OS about pid 0.
                         self.id_to_child_pid
                             .get(terminal_pane_id)
+                            .filter(|&&pid| pid > 0)
                             .and_then(|&pid| {
                                 self.bus
                                     .os_input
@@ -2011,6 +2022,15 @@ impl Pty {
         Ok(())
     }
     fn capture_initial_cwd(&mut self, terminal_id: u32, child_fd: RawFd) {
+        // child_fd <= 0 is meaningless as a pid (Pid::from_raw(0) resolves to
+        // the zellij server's own cwd on macOS, which is not what we want).
+        // Hot reload occasionally hits this when tcgetpgrp on the reused
+        // master fd can't find a foreground process group; better to leave
+        // terminal_cwds unpopulated and let later cwd lookups try again with
+        // a live pid than to cache a poisoned ~/ value.
+        if child_fd <= 0 {
+            return;
+        }
         if let Some(os_input) = self.bus.os_input.as_ref() {
             if let Some(cwd) = os_input.get_cwd(Pid::from_raw(child_fd)) {
                 self.terminal_cwds.insert(terminal_id, cwd);
