@@ -11,6 +11,7 @@ mod pane_groups;
 mod plugins;
 mod pty;
 mod pty_writer;
+mod retry_budget;
 mod route;
 mod screen;
 mod session_layout_metadata;

@@ -3,6 +3,7 @@ use std::sync::{Arc, RwLock};
 use tokio::sync::oneshot;
 
 use crate::global_async_runtime::get_tokio_runtime;
+use crate::retry_budget::RetryBudget;
 use crate::thread_bus::ThreadSenders;
 use crate::{
     os_input_output::ServerOsApi,
@@ -1647,13 +1648,20 @@ pub(crate) fn route_action(
     Ok((should_break, Some(result)))
 }
 
-// this should only be used for one-off startup instructions
+// this should only be used for one-off startup instructions.
+//
+// Note: we log at DEBUG here rather than WARN because the route
+// drain loop owns the user-visible reporting (first-attempt WARN,
+// periodic progress, and the circuit-breaker ERROR when the budget
+// is exhausted). Logging at WARN inside the macro produced a wall
+// of duplicate "Server not ready" lines once a wedged session got
+// into the retry path — see retry_budget.rs.
 macro_rules! send_to_screen_or_retry_queue {
     ($senders:expr, $message:expr, $instruction: expr, $retry_queue:expr) => {{
         match $senders.as_ref() {
             Some(senders) => senders.send_to_screen($message),
             None => {
-                log::warn!("Server not ready, trying to place instruction in retry queue...");
+                log::debug!("Server not ready, queueing instruction for retry");
                 if let Some(retry_queue) = $retry_queue.as_mut() {
                     retry_queue.push_back($instruction);
                 }
@@ -1672,6 +1680,12 @@ pub(crate) fn route_thread_main(
     client_id: ClientId,
 ) -> Result<()> {
     let mut retry_queue = VecDeque::new();
+    // Budget for the per-client retry drain loop. The drain happens
+    // when session_data is transiently `None` (the session is still
+    // booting); without a cap, a permanent `None` (wedged Screen
+    // thread, dead session) used to spin this thread at ~200Hz
+    // forever — see retry_budget.rs for the full story.
+    let mut retry_budget = RetryBudget::default();
     let err_context = || format!("failed to handle instruction for client {client_id}");
     let mut seen_cli_pipes = HashSet::new();
     let mut consecutive_unknown_messages_received = 0;
@@ -2114,15 +2128,61 @@ pub(crate) fn route_thread_main(
                 };
                 let mut output_sent_overall = false;
                 let mut repeat_retries = VecDeque::new();
+                let mut bail_retry_loop = false;
                 while let Some(instruction_to_retry) = retry_queue.pop_front() {
-                    log::warn!("Server ready, retrying sending instruction.");
-                    thread::sleep(Duration::from_millis(5));
+                    if !retry_budget.record_attempt() {
+                        // Circuit breaker: session_data has been None
+                        // for too long. Dropping any remaining queued
+                        // instructions, logging out the client so it
+                        // can reconnect cleanly instead of pinning
+                        // the route thread in a livelock.
+                        log::error!(
+                            "Route retry budget exhausted after {} attempts for client {}; \
+                             dropping {} pending instruction(s) and disconnecting client. \
+                             This usually means the session's Screen thread is wedged.",
+                            retry_budget.attempts(),
+                            client_id,
+                            retry_queue.len() + repeat_retries.len() + 1,
+                        );
+                        retry_queue.clear();
+                        repeat_retries.clear();
+                        let _ = os_input.send_to_client(
+                            client_id,
+                            ServerToClientMsg::Exit {
+                                exit_reason: ExitReason::Error(
+                                    "Session route stuck; reconnect to recover.".to_string(),
+                                ),
+                            },
+                        );
+                        let _ = to_server.send(ServerInstruction::RemoveClient(client_id));
+                        bail_retry_loop = true;
+                        break;
+                    }
+                    if retry_budget.should_log() {
+                        log::warn!(
+                            "Server not ready, retrying queued instruction (attempt {}/{}).",
+                            retry_budget.attempts(),
+                            retry_budget.max_attempts(),
+                        );
+                    }
+                    thread::sleep(retry_budget.backoff());
+                    let before = repeat_retries.len();
                     let (should_break, output_sent) =
                         handle_instruction(instruction_to_retry, Some(&mut repeat_retries))?;
                     output_sent_overall |= output_sent;
+                    if repeat_retries.len() == before {
+                        // The instruction was delivered (not
+                        // re-queued) — session_data came back, reset
+                        // the budget so a future stall starts from a
+                        // fresh quota.
+                        retry_budget.reset();
+                    }
                     if should_break {
                         break 'route_loop;
                     }
+                }
+                if bail_retry_loop {
+                    break 'route_loop;
                 }
                 // retry on loop around
                 retry_queue.append(&mut repeat_retries);
