@@ -5027,7 +5027,10 @@ pub(crate) fn screen_thread_main(
                     }
                 }
 
-                // Always switch back to Normal
+                // Always switch back to Normal — update both plugin-facing
+                // mode_info (so hints disappear) and the server's per-client
+                // input-mode map (so the next keypress isn't routed as
+                // TabJumpInput again).
                 let mut normal_mode_info = screen
                     .mode_info
                     .get(&client_id)
@@ -5035,6 +5038,13 @@ pub(crate) fn screen_thread_main(
                     .unwrap_or_else(|| screen.default_mode_info.clone());
                 normal_mode_info.mode = InputMode::Normal;
                 screen.change_mode(normal_mode_info, client_id)?;
+                screen
+                    .bus
+                    .senders
+                    .send_to_server(ServerInstruction::ChangeMode(
+                        client_id,
+                        InputMode::Normal,
+                    ))?;
                 screen.render(None)?;
             },
             ScreenInstruction::UndoRenameTab(
